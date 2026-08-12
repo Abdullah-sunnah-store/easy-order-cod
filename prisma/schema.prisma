@@ -1,0 +1,122 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  // Local dev: file:dev.sqlite (.env). On Fly: file:/data/prod.sqlite (a volume).
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// Per-shop configuration for the Cash-on-Delivery order form.
+model CodSettings {
+  shop           String   @id
+  enabled        Boolean  @default(true)
+  headingText    String   @default("Order — Cash on Delivery")
+  buttonText     String   @default("Order Now (Cash on Delivery)")
+  successMessage String   @default("Thank you! Your order has been placed. We'll call you to confirm.")
+  orderTag       String   @default("COD")
+  // Which fields to show on the storefront form.
+  showName       Boolean  @default(true)
+  showEmail      Boolean  @default(false)
+  showPhone      Boolean  @default(true)
+  showAddress    Boolean  @default(true)
+  showCity       Boolean  @default(true)
+  showQuantity   Boolean  @default(true)
+  showNotes      Boolean  @default(false)
+  // Country dial codes offered beside the phone field. Comma-separated; the
+  // first entry is preselected. Customers can then type a local number
+  // (01709504746) and still produce a valid international phone.
+  dialCodes      String   @default("+880,+91,+92,+977,+94,+971,+966,+60,+65,+44,+1")
+  // Fraud prevention
+  otpEnabled         Boolean @default(false)
+  phoneConfirmation  Boolean @default(false)
+  ipBlockingEnabled  Boolean @default(false)
+  blockedIps         String  @default("")
+  blockedPostalCodes String  @default("")
+  maxOrdersPerPhone  Int     @default(0)
+  // Delivery / COD fees
+  codFee                Float @default(0)
+  shippingRate          Float @default(0)
+  freeShippingThreshold Float @default(0)
+  // Storefront presentation previously held in the theme block's schema.
+  // currencySymbol "" = derive from the shop's own money format.
+  currencySymbol   String @default("")
+  countdownMinutes Int    @default(0)
+  // JSON array of { name, price } shipping choices shown on the form.
+  shippingOptions  String @default("[]")
+  // Form-builder appearance (JSON: form type, button styling, colors, radius…)
+  builderConfig  String   @default("{}")
+  updatedAt      DateTime @updatedAt
+}
+
+// Marketing pixels and third-party integrations ("Connections").
+model Connections {
+  shop               String   @id
+  fbPixelId          String   @default("")
+  tiktokPixelId      String   @default("")
+  googleTagId        String   @default("")
+  snapPixelId        String   @default("")
+  pinterestTagId     String   @default("")
+  googleSheetsEnabled Boolean @default(false)
+  googleSheetUrl     String   @default("")
+  smsProvider        String   @default("none")
+  smsApiKey          String   @default("")
+  smsSenderId        String   @default("")
+  whatsappEnabled    Boolean  @default(false)
+  whatsappPhone      String   @default("")
+  updatedAt          DateTime @updatedAt
+}
+
+// Monthly COD order count per shop, used to enforce the plan's order limit.
+// Keyed by UTC calendar month ("2026-08"); no customer data is stored here.
+model UsageCounter {
+  shop      String
+  period    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([shop, period])
+}
+
+// Upsell / order-bump offers configured by the merchant.
+model Upsell {
+  id                String   @id @default(cuid())
+  shop              String
+  title             String   @default("Special offer")
+  type              String   @default("bump")
+  offerProductId    String   @default("")
+  offerProductTitle String   @default("")
+  discountPercent   Int      @default(0)
+  minQuantity       Int      @default(1)
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  @@index([shop])
+}

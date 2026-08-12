@@ -1,0 +1,81 @@
+{% comment %}
+  Cash-on-Delivery order form. A product-page button opens a centered modal
+  with the order form, shipping options, live summary and totals.
+
+  This block has NO theme-editor settings by design: everything (text, colours,
+  layout, shipping options, countdown, fees) is configured in the Easy order COD
+  app under Form settings, and fetched at runtime from /apps/cod/settings.
+  Only product data — which the app can't know — comes from Liquid.
+{% endcomment %}
+
+{% if product %}
+  {% assign v = product.selected_or_first_available_variant %}
+  <div
+    class="cod"
+    data-cod-form
+    data-variant-id="{{ v.id }}"
+    data-price="{{ v.price }}"
+    data-product-title="{{ product.title | escape }}"
+    data-product-image="{{ v.image | default: product.featured_image | image_url: width: 100 }}"
+    data-money-format="{{ shop.money_format | escape }}"
+  >
+    <button type="button" class="cod__open" data-cod-open>Cash on Delivery</button>
+
+    <div class="cod__overlay" data-cod-overlay>
+      <div class="cod__modal" role="dialog" aria-modal="true">
+        <div class="cod__head">
+          <span>Order — Cash on Delivery</span>
+          <button type="button" class="cod__close" data-cod-close aria-label="Close">&times;</button>
+        </div>
+
+        <form class="cod__form" data-cod-form-el>
+          <div class="cod__row" data-cod-field="name"><label>Name<span>*</span></label><input type="text" name="name" autocomplete="name" required /></div>
+          {% comment %} The dial-code <select> is filled by cod-form.js from the app settings. {% endcomment %}
+          <div class="cod__row" data-cod-field="phone"><label>Phone<span>*</span></label><div class="cod__phone"><select name="dialCode" data-cod-dial hidden aria-label="Country code"></select><input type="tel" name="phone" autocomplete="tel" required /></div></div>
+          <div class="cod__row" data-cod-field="email"><label>Email</label><input type="email" name="email" autocomplete="email" /></div>
+          <div class="cod__row" data-cod-field="address"><label>Address<span>*</span></label><input type="text" name="address" autocomplete="street-address" required /></div>
+          <div class="cod__row" data-cod-field="city"><label>City</label><input type="text" name="city" autocomplete="address-level2" /></div>
+
+          {% comment %} Shipping choices are rendered by cod-form.js from the app settings. {% endcomment %}
+          <div class="cod__ship" data-cod-ship hidden>
+            <div class="cod__ship-title">Shipping options</div>
+            <div data-cod-ship-list></div>
+          </div>
+
+          <div class="cod__row cod__qty" data-cod-field="quantity"><label>Quantity</label><input type="number" name="quantity" value="1" min="1" data-cod-qty /></div>
+
+          <div class="cod__summary" data-cod-summary></div>
+
+          <div class="cod__timer" data-cod-timer hidden></div>
+
+          <div class="cod__row" data-cod-field="notes"><label>Note</label><input type="text" name="notes" /></div>
+
+          <button type="submit" class="cod__submit" data-cod-submit></button>
+          <p class="cod__msg" data-cod-message hidden></p>
+        </form>
+
+        <div class="cod__done" data-cod-done hidden>
+          <div class="cod__done-icon">&#10004;</div>
+          <div class="cod__done-title">Order placed!</div>
+          <p class="cod__done-msg" data-cod-done-msg></p>
+          <button type="button" class="cod__ok" data-cod-ok>OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% schema %}
+{
+  "name": "COD Order Form",
+  "target": "section",
+  "stylesheet": "cod-form.css",
+  "javascript": "cod-form.js",
+  "settings": [
+    {
+      "type": "paragraph",
+      "content": "Everything about this form — text, colours, fields, shipping options, countdown and fees — is configured in the Easy order COD app under Form settings. No setup is needed here."
+    }
+  ]
+}
+{% endschema %}

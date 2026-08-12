@@ -1,0 +1,17 @@
+node_modules
+.cache
+build
+/public/build
+/app/build
+
+# Never bake secrets or local state into the image
+.env
+.env.*
+.shopify
+.git
+.gitignore
+
+# Local SQLite dev database (production uses the Fly volume)
+*.sqlite
+*.sqlite-journal
+prisma/dev.sqlite

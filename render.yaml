@@ -1,0 +1,31 @@
+# Render Blueprint for the Easy order COD app.
+#
+# Deploy: push this repo to GitHub, then Render → New → Blueprint → pick the
+# repo. Render reads this file and creates the service.
+#
+# The four `sync: false` variables are NOT stored here — Render prompts for
+# them on first deploy. Never commit the API secret to the repo.
+services:
+  - type: web
+    name: easy-order-cod
+    runtime: docker
+    plan: free
+    region: singapore
+    # Every other route demands a Shopify session and would answer a probe with
+    # a redirect or a 401, which Render scores as a failed deploy.
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: SCOPES
+        value: read_orders,write_orders,read_products
+      # Set to this service's own https URL once Render assigns it, e.g.
+      # https://easy-order-cod.onrender.com — then redeploy.
+      - key: SHOPIFY_APP_URL
+        sync: false
+      # Neon connection string. Use the POOLED host and keep ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false

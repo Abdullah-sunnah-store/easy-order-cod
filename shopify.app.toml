@@ -1,0 +1,60 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
+name = "Easy order COD"
+application_url = "https://easy-order-cod.fly.dev/app"
+embedded = true
+handle = "easy-order-cod"
+
+[build]
+# Push the tunnel URLs to the Partner dashboard on dev so the embedded iframe
+# loads the public HTTPS tunnel instead of localhost. NOTE: `shopify app dev`
+# rewrites application_url, redirect_urls and app_proxy.url in THIS file while
+# it runs. Release from shopify.app.production.toml instead — see that file.
+automatically_update_urls_on_dev = true
+
+# The storefront form calls /apps/cod/settings and /apps/cod/order through this
+# proxy. Without it those paths 404 and no COD order can ever be created.
+[app_proxy]
+url = "https://easy-order-cod.fly.dev/proxy"
+subpath = "cod"
+prefix = "apps"
+
+[webhooks]
+api_version = "2025-01"
+
+  # App lifecycle
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
+[access_scopes]
+# Only what the COD app actually uses: create orders, read orders/products.
+scopes = "read_orders,write_orders,read_products"
+
+[auth]
+redirect_urls = [
+  "https://easy-order-cod.fly.dev/auth/callback",
+  "https://easy-order-cod.fly.dev/auth/shopify/callback",
+  "https://easy-order-cod.fly.dev/api/auth/callback"
+]
+
+[pos]
+embedded = false

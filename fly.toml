@@ -1,0 +1,28 @@
+# Fly.io configuration for the Easy order COD app.
+# `app` must be globally unique — change it if `fly launch` says it's taken,
+# and set `primary_region` to the code nearest you (e.g. sin, iad, fra, bom).
+app = "easy-order-cod"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Keep one machine always running so the embedded app loads instantly and
+  # webhooks are never missed.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+# Persistent disk for the SQLite database (survives deploys/restarts).
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
