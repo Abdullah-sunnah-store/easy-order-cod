@@ -230,6 +230,49 @@
 
 .cod__qty input { max-width: 6em; }
 
+/* Upsell offers, rendered from the app's Upsells page. Styled to read as an
+   opt-in add-on rather than another required field. */
+.cod__offers { margin: 0.6rem 0 0.85rem; }
+.cod__offers-title { font-weight: 700; font-size: 1em; margin-bottom: 0.5rem; }
+.cod__offer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65em 0.8em;
+  border: 1px dashed var(--cod-accent, #e02424);
+  border-radius: var(--cod-input-radius, 8px);
+  margin-bottom: 0.45rem;
+  font-size: 0.95em;
+  cursor: pointer;
+}
+.cod__offer input[type="checkbox"] { flex-shrink: 0; accent-color: var(--cod-accent, #e02424); }
+.cod__offer-body { flex: 1; min-width: 0; }
+.cod__offer-head { display: block; font-weight: 700; }
+.cod__offer-line { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem; }
+.cod__offer-line img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+.cod__offer-pick {
+  display: block;
+  margin-top: 0.3rem;
+  max-width: 100%;
+  padding: 0.35em 0.5em;
+  border: 1px solid var(--cod-input-border, #e2e2e2);
+  border-radius: var(--cod-input-radius, 8px);
+  background: var(--cod-input-bg, #fff);
+  font: inherit;
+  font-size: 0.95em;
+}
+.cod__offer-price { flex-shrink: 0; font-weight: 700; white-space: nowrap; }
+.cod__offer-price s { opacity: 0.55; font-weight: 400; margin-right: 0.2em; }
+.cod__offer-note {
+  font-size: 0.9em;
+  color: var(--cod-accent, #e02424);
+  font-weight: 600;
+  padding: 0.2rem 0;
+}
+.cod__summary .cod__line--add span,
+.cod__summary .cod__line--save span { opacity: 0.85; }
+.cod__summary .cod__line--save b { color: var(--cod-accent, #e02424); }
+
 .cod__summary {
   border-top: 1px solid #eee;
   margin-top: 0.5rem;

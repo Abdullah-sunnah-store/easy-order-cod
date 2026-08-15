@@ -5,6 +5,14 @@ import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { getActivePlan } from "../models/billing.server";
 import { can } from "../lib/plans";
+import { getLiveRates } from "../models/shippingSync.server";
+import { resolveUpsells } from "../models/upsellResolve.server";
+import type { ShipMode, ShipOption, ShipRule } from "../lib/shipping";
+import {
+  DEFAULT_FALLBACK_LABEL,
+  parseJsonArray,
+  resolveShippingOptions,
+} from "../lib/shipping";
 
 // Returns the storefront-relevant COD form settings as JSON.
 // Called by the theme extension via /apps/cod/settings (signed by Shopify).
@@ -23,12 +31,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {
     /* ignore malformed */
   }
-  let shippingOptions: Array<{ name: string; price: number }> = [];
+  const mode = ((s.shippingMode as ShipMode) || "manual") as ShipMode;
+  const manual = parseJsonArray<ShipOption>(s.shippingOptions);
+  let synced = parseJsonArray<ShipOption>(s.shippingSynced);
+  // Auto-refresh keeps the form in step with the shop's shipping zones; it falls
+  // back to the last stored sync if the Admin API call fails.
+  if (s.shippingAutoSync && (mode === "auto" || mode === "both")) {
+    synced = await getLiveRates(admin, session.shop, synced);
+  }
+  const shipping = {
+    mode,
+    manual,
+    synced,
+    hiddenRates: parseJsonArray<string>(s.shippingHiddenRates),
+    rulesEnabled: s.shippingRulesEnabled,
+    rules: parseJsonArray<ShipRule>(s.shippingRules),
+    fallbackPrice: s.shippingFallbackPrice,
+    fallbackLabel: s.shippingFallbackLabel || DEFAULT_FALLBACK_LABEL,
+    freeShippingThreshold: s.freeShippingThreshold,
+  };
+  // The city-independent list, for older cached copies of cod-form.js that
+  // don't know how to re-price by city.
+  const shippingOptions = resolveShippingOptions(shipping);
+
+  // Offers from the Upsells page, resolved to real variants and prices. A
+  // failure here must not take the order form down with it.
+  let upsells: Awaited<ReturnType<typeof resolveUpsells>> = [];
   try {
-    const parsed = JSON.parse(s.shippingOptions || "[]");
-    if (Array.isArray(parsed)) shippingOptions = parsed;
+    upsells = await resolveUpsells(admin, session.shop);
   } catch {
-    /* ignore malformed */
+    /* form still works without offers */
   }
   // "+880, +91" -> ["+880","+91"]; the first is preselected on the form.
   const dialCodes = String((s as any).dialCodes || "")
@@ -47,6 +79,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     countdownMinutes: s.countdownMinutes,
     codFee: s.codFee,
     shippingOptions,
+    shipping,
+    upsells,
     fields: {
       name: s.showName,
       email: s.showEmail,

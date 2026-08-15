@@ -8,6 +8,17 @@ primary_region = "sin"
 
 [env]
   PORT = "3000"
+  # SQLite on the [[mounts]] volume below, so the database survives deploys.
+  # `npm run setup` runs `prisma migrate deploy` against this at every boot.
+  DATABASE_URL = "file:/data/prod.sqlite"
+  # Must match this app's own https URL, or OAuth redirects land nowhere.
+  SHOPIFY_APP_URL = "https://easy-order-cod.fly.dev"
+  # Public client id — the same value as [client_id] in shopify.app.toml.
+  SHOPIFY_API_KEY = "7d6846fb9f944b6701f6cc35b77eab6f"
+  # Keep in sync with shopify.app.production.toml [access_scopes].
+  SCOPES = "read_orders,write_orders,read_products,read_shipping"
+  # SHOPIFY_API_SECRET is NOT here on purpose — set it once with:
+  #   flyctl secrets set SHOPIFY_API_SECRET=shpss_...
 
 [http_service]
   internal_port = 3000

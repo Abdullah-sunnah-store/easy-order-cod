@@ -12,8 +12,14 @@ export async function createUpsell(
   data: {
     title: string;
     type: string;
+    offerKind?: string;
     offerProductId?: string;
     offerProductTitle?: string;
+    offerVariantId?: string;
+    offerHandle?: string;
+    offerImage?: string;
+    offerPrice?: string;
+    offerProductCount?: number;
     discountPercent?: number;
     minQuantity?: number;
     enabled?: boolean;

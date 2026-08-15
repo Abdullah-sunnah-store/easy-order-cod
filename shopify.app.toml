@@ -46,8 +46,9 @@ api_version = "2025-01"
   uri = "/webhooks/shop/redact"
 
 [access_scopes]
-# Only what the COD app actually uses: create orders, read orders/products.
-scopes = "read_orders,write_orders,read_products"
+# Only what the COD app actually uses: create orders, read orders/products, and
+# read the shop's shipping zones for the Form builder's auto-synced rates.
+scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [

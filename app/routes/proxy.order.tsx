@@ -5,6 +5,18 @@ import { getCodSettings } from "../models/codSettings.server";
 import { getActivePlan } from "../models/billing.server";
 import { getMonthlyOrderCount, incrementMonthlyOrderCount } from "../models/usage.server";
 import { orderLimit } from "../lib/plans";
+import type { ShipMode, ShipOption, ShipRule } from "../lib/shipping";
+import {
+  DEFAULT_FALLBACK_LABEL,
+  parseJsonArray,
+  qualifiesForFreeShipping,
+  resolveShippingOptions,
+} from "../lib/shipping";
+import {
+  discountedPrice,
+  quantityDiscountFor,
+  resolveUpsells,
+} from "../models/upsellResolve.server";
 
 // App proxy requests are GET-able too; we only accept POST for creating orders.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -34,8 +46,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const city = String(body.get("city") || "").trim();
   const notes = String(body.get("notes") || "").trim();
   const shippingTitle = String(body.get("shippingTitle") || "").trim();
-  const shippingPrice = parseFloat(String(body.get("shippingPrice") || "0")) || 0;
+  const submittedShipping = parseFloat(String(body.get("shippingPrice") || "0")) || 0;
   const codFee = parseFloat(String(body.get("codFee") || "0")) || 0;
+  // [{ offerId, variantId }] — ids only. Prices are recomputed below.
+  let acceptedOffers: Array<{ offerId: string; variantId: string }> = [];
+  try {
+    const parsed = JSON.parse(String(body.get("upsells") || "[]"));
+    if (Array.isArray(parsed)) acceptedOffers = parsed;
+  } catch {
+    /* an unparseable list just means no add-ons */
+  }
 
   if (!variantId) {
     return json({ ok: false, error: "Missing product." }, { status: 400 });
@@ -75,10 +95,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // NOTE: `#graphql` must be on its own line — inline it comments out the query.
     const shopResp = await admin.graphql(
       `#graphql
-      query ShopCurrency { shop { currencyCode billingAddress { countryCodeV2 } } }`,
+      query ShopCurrency($variantId: ID!) {
+        shop { currencyCode billingAddress { countryCodeV2 } }
+        productVariant(id: $variantId) { price }
+      }`,
+      { variables: { variantId: gid } },
     );
     const shopJson = await shopResp.json();
     const currencyCode = shopJson.data?.shop?.currencyCode || "USD";
+
+    // Re-price the shipping here rather than trusting the browser: the rate the
+    // form posts is chosen client-side, so a tampered request could otherwise
+    // ship for free. A title we don't recognise keeps the submitted price —
+    // that's an older cached form, not necessarily an attack.
+    const shippingConfig = {
+      mode: ((settings.shippingMode as ShipMode) || "manual") as ShipMode,
+      manual: parseJsonArray<ShipOption>(settings.shippingOptions),
+      synced: parseJsonArray<ShipOption>(settings.shippingSynced),
+      hiddenRates: parseJsonArray<string>(settings.shippingHiddenRates),
+      rulesEnabled: settings.shippingRulesEnabled,
+      rules: parseJsonArray<ShipRule>(settings.shippingRules),
+      fallbackPrice: settings.shippingFallbackPrice,
+      fallbackLabel: settings.shippingFallbackLabel || DEFAULT_FALLBACK_LABEL,
+      freeShippingThreshold: settings.freeShippingThreshold,
+    };
+    const known = resolveShippingOptions(shippingConfig, city).find(
+      (o) => o.name.toLowerCase() === shippingTitle.toLowerCase(),
+    );
+    let shippingPrice = known ? known.price : submittedShipping;
+    const unitPrice = parseFloat(shopJson.data?.productVariant?.price ?? "");
+    // Free shipping is settled once the add-ons below are priced — they count
+    // towards the threshold, exactly as the form shows the customer.
+
     // Shopify silently DISCARDS a MailingAddressInput it can't resolve to a real
     // place — no userErrors, order still created, address simply absent. An
     // address with no country is the common way to trip this, so stamp the
@@ -98,7 +146,52 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       presentmentMoney: { amount, currencyCode },
     });
 
-    const lineItems: Record<string, unknown>[] = [{ variantId: gid, quantity }];
+    // Offers are re-resolved from the merchant's own configuration and priced
+    // here. The browser only names which offer and variant it accepted, so a
+    // tampered request can't invent an item or a discount.
+    let offers: Awaited<ReturnType<typeof resolveUpsells>> = [];
+    try {
+      offers = await resolveUpsells(admin, session.shop, { fresh: true });
+    } catch {
+      /* an order without its add-ons beats no order at all */
+    }
+
+    const upsellLines: Record<string, unknown>[] = [];
+    let upsellSubtotal = 0;
+    for (const accepted of acceptedOffers) {
+      const offer = offers.find((o) => o.id === accepted?.offerId);
+      // Quantity offers discount the main item; they never add one.
+      if (!offer || offer.type === "quantity") continue;
+      const item = offer.items.find((i) => i.variantId === accepted?.variantId);
+      if (!item) continue; // not part of that offer — ignore it
+      const price = discountedPrice(item.price, offer.discountPercent);
+      upsellSubtotal += price;
+      upsellLines.push({
+        variantId: item.variantId,
+        quantity: 1,
+        priceSet: money(price.toFixed(2)),
+      });
+    }
+
+    const mainLine: Record<string, unknown> = { variantId: gid, quantity };
+    // A quantity offer discounts the product being bought, so it changes the
+    // main line's unit price rather than adding a line.
+    const qtyDiscount = quantityDiscountFor(offers, quantity);
+    if (qtyDiscount > 0 && Number.isFinite(unitPrice)) {
+      mainLine.priceSet = money(discountedPrice(unitPrice, qtyDiscount).toFixed(2));
+    }
+
+    // Now the whole order is priced, so the free-shipping threshold can be
+    // tested against the same subtotal the customer saw.
+    if (Number.isFinite(unitPrice)) {
+      const subtotal =
+        discountedPrice(unitPrice, qtyDiscount) * quantity + upsellSubtotal;
+      if (qualifiesForFreeShipping(subtotal, settings.freeShippingThreshold)) {
+        shippingPrice = 0;
+      }
+    }
+
+    const lineItems: Record<string, unknown>[] = [mainLine, ...upsellLines];
     if (codFee > 0) {
       lineItems.push({
         title: "Cash on Delivery fee",

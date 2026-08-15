@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "remix vite:build",
-    "dev": "shopify app dev --client-id=7d6846fb9f944b6701f6cc35b77eab6f --store=quickstart-bde28151.myshopify.com",
+    "dev": "prisma generate && shopify app dev --client-id=7d6846fb9f944b6701f6cc35b77eab6f --store=quickstart-bde28151.myshopify.com",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",

@@ -44,6 +44,12 @@
 
           <div class="cod__row cod__qty" data-cod-field="quantity"><label>Quantity</label><input type="number" name="quantity" value="1" min="1" data-cod-qty /></div>
 
+          {% comment %} Upsell offers are rendered by cod-form.js from the app settings. {% endcomment %}
+          <div class="cod__offers" data-cod-offers hidden>
+            <div class="cod__offers-title">Add to your order</div>
+            <div data-cod-offers-list></div>
+          </div>
+
           <div class="cod__summary" data-cod-summary></div>
 
           <div class="cod__timer" data-cod-timer hidden></div>
@@ -74,7 +80,7 @@
   "settings": [
     {
       "type": "paragraph",
-      "content": "Everything about this form — text, colours, fields, shipping options, countdown and fees — is configured in the Easy order COD app under Form settings. No setup is needed here."
+      "content": "Everything about this form — text, colours, fields, shipping options, upsell offers, countdown and fees — is configured in the Easy order COD app. No setup is needed here."
     }
   ]
 }

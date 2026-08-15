@@ -20,8 +20,9 @@ services:
         sync: false
       - key: SHOPIFY_API_SECRET
         sync: false
+      # Keep in sync with shopify.app.production.toml [access_scopes].
       - key: SCOPES
-        value: read_orders,write_orders,read_products
+        value: read_orders,write_orders,read_products,read_shipping
       # Set to this service's own https URL once Render assigns it, e.g.
       # https://easy-order-cod.onrender.com — then redeploy.
       - key: SHOPIFY_APP_URL

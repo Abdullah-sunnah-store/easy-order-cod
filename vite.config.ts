@@ -43,6 +43,11 @@ export default defineConfig({
     cors: {
       preflightContinue: true,
     },
+    // Bind IPv4 explicitly. Left as the default "localhost", Node resolves to
+    // ::1 on Windows while the Shopify CLI proxy dials 127.0.0.1 — the dev
+    // server then runs fine but every proxied request is ECONNREFUSED. It
+    // surfaces after any restart that rebinds the port (editing .env is one).
+    host: "127.0.0.1",
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
     fs: {

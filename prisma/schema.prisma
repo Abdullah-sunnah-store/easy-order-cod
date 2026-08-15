@@ -69,8 +69,31 @@ model CodSettings {
   // currencySymbol "" = derive from the shop's own money format.
   currencySymbol   String @default("")
   countdownMinutes Int    @default(0)
-  // JSON array of { name, price } shipping choices shown on the form.
+  // JSON array of { name, price } shipping choices shown on the form. These are
+  // the merchant's own hand-written rates.
   shippingOptions  String @default("[]")
+  // Where the rates on the form come from: "manual" (shippingOptions only),
+  // "auto" (rates synced from the shop's Shopify shipping zones) or "both".
+  shippingMode     String   @default("manual")
+  // Last successful sync of the shop's Shopify delivery profiles, as a JSON
+  // array of { name, price }. Kept so the storefront still has rates when a
+  // live refresh fails or is switched off.
+  shippingSynced   String    @default("[]")
+  shippingSyncedAt DateTime?
+  // Re-pull the Shopify rates on every storefront request (cached briefly)
+  // instead of only when the merchant presses "Sync now".
+  shippingAutoSync Boolean   @default(false)
+  // Synced rates the merchant switched off, as a JSON array of rate names.
+  // Stored by name, not position, so a re-sync doesn't hide the wrong rate; a
+  // newly appearing rate defaults to shown.
+  shippingHiddenRates String @default("[]")
+  // Dynamic rate: the price follows the city the customer types. JSON array of
+  // { cities: "Dhaka, Gazipur", price, label }; the first matching rule wins and
+  // shippingFallback* applies when nothing matches.
+  shippingRulesEnabled  Boolean @default(false)
+  shippingRules         String  @default("[]")
+  shippingFallbackPrice Float   @default(0)
+  shippingFallbackLabel String  @default("Delivery charge")
   // Form-builder appearance (JSON: form type, button styling, colors, radius…)
   builderConfig  String   @default("{}")
   updatedAt      DateTime @updatedAt
@@ -111,8 +134,19 @@ model Upsell {
   shop              String
   title             String   @default("Special offer")
   type              String   @default("bump")
+  // What is being offered, chosen with the Shopify resource picker.
+  // offerKind "product" = one product (offerVariantId names the variant);
+  // "collection" = any item from a collection.
+  offerKind         String   @default("product")
   offerProductId    String   @default("")
   offerProductTitle String   @default("")
+  offerVariantId    String   @default("")
+  offerHandle       String   @default("")
+  offerImage        String   @default("")
+  // Amount only ("250.00") — rendered with the shop's own money format.
+  offerPrice        String   @default("")
+  // Collections: how many products are in it, shown as a hint in the table.
+  offerProductCount Int      @default(0)
   discountPercent   Int      @default(0)
   minQuantity       Int      @default(1)
   enabled           Boolean  @default(true)

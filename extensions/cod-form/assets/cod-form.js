@@ -73,7 +73,87 @@
         }
       });
     }
+    // ---- Upsell offers (from the app's Upsells page) ----
+    var offers = [];
+    var offersWrap = overlay.querySelector("[data-cod-offers]");
+    var offersList = overlay.querySelector("[data-cod-offers-list]");
+
+    // Titles come from the merchant's catalogue and are injected as HTML in the
+    // summary, so they get escaped on the way in.
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function offerItemById(offerId, variantId) {
+      for (var i = 0; i < offers.length; i++) {
+        if (offers[i].id !== offerId) continue;
+        var items = offers[i].items || [];
+        for (var j = 0; j < items.length; j++) {
+          if (items[j].variantId === variantId) return items[j];
+        }
+      }
+      return null;
+    }
+
+    function offerCents(price, discountPercent) {
+      var pct = Math.min(100, Math.max(0, parseFloat(discountPercent) || 0));
+      return Math.round((parseFloat(price) || 0) * (1 - pct / 100) * 100);
+    }
+
+    /** The add-on items the customer has ticked, as {variantId, cents}. */
+    function chosenOffers() {
+      if (!offersList) return [];
+      var out = [];
+      var boxes = offersList.querySelectorAll("input[data-cod-offer]");
+      for (var i = 0; i < boxes.length; i++) {
+        if (!boxes[i].checked) continue;
+        var offerId = boxes[i].getAttribute("data-cod-offer");
+        // Collection offers pair the checkbox with a <select> of products.
+        var picker = offersList.querySelector('select[data-cod-offer-pick="' + offerId + '"]');
+        var variantId = picker ? picker.value : boxes[i].getAttribute("data-variant");
+        var cents = picker
+          ? parseInt(picker.options[picker.selectedIndex].getAttribute("data-cents") || "0", 10)
+          : parseInt(boxes[i].getAttribute("data-cents") || "0", 10);
+        if (variantId) out.push({ offerId: offerId, variantId: variantId, cents: cents || 0 });
+      }
+      return out;
+    }
+
+    function offersCents() {
+      return chosenOffers().reduce(function (sum, o) { return sum + o.cents; }, 0);
+    }
+
+    // Quantity offers discount the product being bought rather than adding one.
+    function quantityDiscountPercent() {
+      var q = qty();
+      var best = 0;
+      for (var i = 0; i < offers.length; i++) {
+        var o = offers[i];
+        if (o.type === "quantity" && q >= (o.minQuantity || 1)) {
+          best = Math.max(best, parseFloat(o.discountPercent) || 0);
+        }
+      }
+      return best;
+    }
+
+    function mainItemCents() {
+      var pct = quantityDiscountPercent();
+      return Math.round(price * qty() * (1 - pct / 100));
+    }
+
+    function subtotalCents() {
+      return mainItemCents() + offersCents();
+    }
+    // Free shipping is decided by the order subtotal, so it has to be re-checked
+    // whenever the quantity changes — not once at render time.
+    function freeShipping() {
+      var t = Math.round((parseFloat(shipCfg.freeShippingThreshold) || 0) * 100);
+      return t > 0 && subtotalCents() >= t;
+    }
     function shippingCents() {
+      if (freeShipping()) return 0;
       var sel = overlay.querySelector('input[name="ship"]:checked');
       return sel ? parseInt(sel.getAttribute("data-ship-price") || "0", 10) || 0 : 0;
     }
@@ -82,15 +162,29 @@
     }
 
     function renderSummary() {
-      var sub = price * qty();
+      var sub = subtotalCents();
       var ship = shippingCents();
       var total = sub + ship + codFee;
       var rows = "";
       rows += '<div class="cod__product">' +
         (image ? '<img src="' + image + '" alt="" />' : "") +
         "<span>" + title + "</span></div>";
+      // Each accepted offer gets its own line so the customer can see what the
+      // extra charge is for.
+      chosenOffers().forEach(function (c) {
+        var item = offerItemById(c.offerId, c.variantId);
+        rows += '<div class="cod__line cod__line--add"><span>+ ' +
+          escapeHtml(item ? item.title : "Added item") +
+          "</span><b>" + money(c.cents) + "</b></div>";
+      });
+      var qPct = quantityDiscountPercent();
+      if (qPct > 0) {
+        rows += '<div class="cod__line cod__line--save"><span>Quantity discount (' +
+          qPct + "%)</span><b>-" + money(Math.round(price * qty() * qPct / 100)) + "</b></div>";
+      }
       rows += '<div class="cod__line"><span>Subtotal</span><b>' + money(sub) + "</b></div>";
-      rows += '<div class="cod__line"><span>Shipping</span><b>' + money(ship) + "</b></div>";
+      rows += '<div class="cod__line"><span>Shipping</span><b>' +
+        (freeShipping() ? "FREE" : money(ship)) + "</b></div>";
       if (codFee > 0) rows += '<div class="cod__line"><span>COD fee</span><b>' + money(codFee) + "</b></div>";
       rows += '<div class="cod__line cod__total"><span>Total</span><b>' + money(total) + "</b></div>";
       summaryEl.innerHTML = rows;
@@ -124,6 +218,9 @@
       submitted = false;
       submitBtn.disabled = false;
       messageEl.hidden = true;
+      // The form was reset, so the city is empty again — re-resolve the rates
+      // before redrawing the totals.
+      refreshShipping();
       renderSummary();
     }
     if (okBtn) okBtn.addEventListener("click", function () { resetToForm(); close(); });
@@ -160,21 +257,108 @@
 
     // Build the shipping choices from the app settings. Prices arrive in the
     // shop's major currency unit (e.g. 80 = ৳80) and are stored as cents here.
+    //
+    // Rate resolution mirrors app/lib/shipping.ts so the price can follow the
+    // city the customer types without a round-trip. Keep the two in step.
     var shipWrap = overlay.querySelector("[data-cod-ship]");
     var shipList = overlay.querySelector("[data-cod-ship-list]");
+    var cityInput = formEl.querySelector('[name="city"]');
+    var shipCfg = {
+      mode: "manual",
+      manual: [],
+      synced: [],
+      hiddenRates: [],
+      rulesEnabled: false,
+      rules: [],
+      fallbackPrice: 0,
+      fallbackLabel: "Delivery charge",
+      freeShippingThreshold: 0
+    };
+
+    function normalizeCity(value) {
+      return String(value == null ? "" : value)
+        .toLowerCase()
+        .replace(/[^0-9a-zÀ-￿]+/gi, " ")
+        .trim();
+    }
+
+    function ruleMatchesCity(rule, city) {
+      var typed = normalizeCity(city);
+      if (!typed) return false;
+      return String((rule && rule.cities) || "")
+        .split(",")
+        .map(normalizeCity)
+        .filter(Boolean)
+        .some(function (name) {
+          return typed.indexOf(name) >= 0 || name.indexOf(typed) >= 0;
+        });
+    }
+
+    // Synced rates the merchant switched off in the app never reach the form.
+    function isRateHidden(name) {
+      var key = String(name || "").trim().toLowerCase();
+      return (shipCfg.hiddenRates || []).some(function (h) {
+        return String(h || "").trim().toLowerCase() === key;
+      });
+    }
+
+    function cleanOptions(list) {
+      return (list || []).filter(function (o) {
+        return o && String(o.name || "").trim() !== "";
+      }).map(function (o) {
+        return { name: String(o.name).trim(), price: parseFloat(o.price) || 0 };
+      });
+    }
+
+    // The rates to show for a given city, in display order: the dynamic rate
+    // first (it is the one that tracks what they typed), then the manual and/or
+    // synced rates, deduped by name.
+    function optionsForCity(city) {
+      var out = [];
+      if (shipCfg.rulesEnabled) {
+        var hit = null;
+        for (var i = 0; i < (shipCfg.rules || []).length; i++) {
+          if (ruleMatchesCity(shipCfg.rules[i], city)) { hit = shipCfg.rules[i]; break; }
+        }
+        out.push(
+          hit
+            ? { name: String(hit.label || "").trim() || shipCfg.fallbackLabel, price: parseFloat(hit.price) || 0 }
+            : { name: shipCfg.fallbackLabel, price: parseFloat(shipCfg.fallbackPrice) || 0 }
+        );
+      }
+      if (shipCfg.mode === "manual" || shipCfg.mode === "both") {
+        out = out.concat(cleanOptions(shipCfg.manual));
+      }
+      if (shipCfg.mode === "auto" || shipCfg.mode === "both") {
+        out = out.concat(cleanOptions(shipCfg.synced).filter(function (o) {
+          return !isRateHidden(o.name);
+        }));
+      }
+      var seen = {};
+      return out.filter(function (o) {
+        var key = o.name.toLowerCase();
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+    }
+
     function renderShipping(options) {
       if (!shipWrap || !shipList) return;
+      // Keep the customer's pick across a city-driven re-render.
+      var previous = overlay.querySelector('input[name="ship"]:checked');
+      var previousValue = previous ? previous.value : null;
       shipList.textContent = "";
-      var valid = (options || []).filter(function (o) {
-        return o && String(o.name || "").trim() !== "";
-      });
+      var valid = cleanOptions(options);
       if (valid.length === 0) {
         shipWrap.hidden = true;
         return;
       }
       shipWrap.hidden = false;
+      var free = freeShipping();
+      var matched = false;
       valid.forEach(function (opt, i) {
-        var cents = Math.round((parseFloat(opt.price) || 0) * 100);
+        var cents = Math.round(opt.price * 100);
         var label = document.createElement("label");
         label.className = "cod__ship-opt";
 
@@ -184,16 +368,130 @@
         radio.name = "ship";
         radio.value = opt.name;
         radio.setAttribute("data-ship-price", String(cents));
-        if (i === 0) radio.checked = true;
+        if (previousValue === opt.name) { radio.checked = true; matched = true; }
         left.appendChild(radio);
         left.appendChild(document.createTextNode(" " + opt.name));
 
         var right = document.createElement("b");
-        right.textContent = money(cents);
+        right.textContent = free ? "FREE" : money(cents);
 
         label.appendChild(left);
         label.appendChild(right);
         shipList.appendChild(label);
+      });
+      // Nothing carried over (first paint, or the old pick disappeared) — the
+      // first rate is the dynamic one when city rules are on, so preselect it.
+      if (!matched) {
+        var first = shipList.querySelector('input[name="ship"]');
+        if (first) first.checked = true;
+      }
+    }
+
+    // Re-price as the city is typed. Only re-renders when the resolved rates
+    // actually change, so typing doesn't reset the radio on every keystroke.
+    var lastRateKey = "";
+    function refreshShipping() {
+      var opts = optionsForCity(cityInput ? cityInput.value : "");
+      var key = JSON.stringify(opts) + "|" + (freeShipping() ? "free" : "paid");
+      if (key === lastRateKey) return;
+      lastRateKey = key;
+      renderShipping(opts);
+    }
+
+    // Build the offer rows. A product offer is a single tickable item; a
+    // collection offer is a tick plus a <select> of the products in it.
+    // Quantity offers add nothing — they discount the item being bought — so
+    // they show as a note instead of a checkbox.
+    function renderOffers() {
+      if (!offersWrap || !offersList) return;
+      offersList.textContent = "";
+      var addable = offers.filter(function (o) {
+        return o.type !== "quantity" && (o.items || []).length > 0;
+      });
+      var quantityOffers = offers.filter(function (o) {
+        return o.type === "quantity" && (o.minQuantity || 1) > 1;
+      });
+      if (addable.length === 0 && quantityOffers.length === 0) {
+        offersWrap.hidden = true;
+        return;
+      }
+      offersWrap.hidden = false;
+
+      addable.forEach(function (offer) {
+        var row = document.createElement("label");
+        row.className = "cod__offer";
+
+        var box = document.createElement("input");
+        box.type = "checkbox";
+        box.setAttribute("data-cod-offer", offer.id);
+
+        var first = offer.items[0];
+        var body = document.createElement("span");
+        body.className = "cod__offer-body";
+
+        var head = document.createElement("span");
+        head.className = "cod__offer-head";
+        head.textContent = offer.title || "Special offer";
+        body.appendChild(head);
+
+        if (offer.kind === "collection" && offer.items.length > 1) {
+          // Let the customer choose which item from the collection they want.
+          var pick = document.createElement("select");
+          pick.className = "cod__offer-pick";
+          pick.setAttribute("data-cod-offer-pick", offer.id);
+          offer.items.forEach(function (item) {
+            var opt = document.createElement("option");
+            var cents = offerCents(item.price, offer.discountPercent);
+            opt.value = item.variantId;
+            opt.setAttribute("data-cents", String(cents));
+            opt.textContent = item.title + " — " + money(cents);
+            pick.appendChild(opt);
+          });
+          // Choosing a different item re-prices the summary via the form's own
+          // change listener — the select sits inside the form.
+          body.appendChild(pick);
+        } else {
+          box.setAttribute("data-variant", first.variantId);
+          box.setAttribute("data-cents", String(offerCents(first.price, offer.discountPercent)));
+          var line = document.createElement("span");
+          line.className = "cod__offer-line";
+          if (first.image) {
+            var img = document.createElement("img");
+            img.src = first.image;
+            img.alt = "";
+            line.appendChild(img);
+          }
+          var name = document.createElement("span");
+          name.textContent = first.title;
+          line.appendChild(name);
+          body.appendChild(line);
+        }
+
+        var priceEl = document.createElement("b");
+        priceEl.className = "cod__offer-price";
+        var full = Math.round((parseFloat(first.price) || 0) * 100);
+        var now = offerCents(first.price, offer.discountPercent);
+        if (offer.discountPercent > 0) {
+          var was = document.createElement("s");
+          was.textContent = money(full);
+          priceEl.appendChild(was);
+          priceEl.appendChild(document.createTextNode(" "));
+        }
+        priceEl.appendChild(document.createTextNode(money(now)));
+
+        row.appendChild(box);
+        row.appendChild(body);
+        row.appendChild(priceEl);
+        offersList.appendChild(row);
+      });
+
+      // "Buy 3+ and save 10%" — a nudge, applied automatically by the summary.
+      quantityOffers.forEach(function (offer) {
+        var note = document.createElement("div");
+        note.className = "cod__offer-note";
+        note.textContent =
+          "Buy " + offer.minQuantity + "+ and save " + offer.discountPercent + "%";
+        offersList.appendChild(note);
       });
     }
 
@@ -244,7 +542,28 @@
         if (cfg.currencySymbol) currency = cfg.currencySymbol;
         codFee = Math.round((parseFloat(cfg.codFee) || 0) * 100);
         countdownMinutes = parseInt(cfg.countdownMinutes, 10) || 0;
-        renderShipping(cfg.shippingOptions);
+        // cfg.shipping carries the mode, the city rules and the free-shipping
+        // threshold; cfg.shippingOptions is the already-resolved list kept for
+        // older payloads that predate it.
+        if (cfg.shipping) {
+          shipCfg.mode = cfg.shipping.mode || "manual";
+          shipCfg.manual = cfg.shipping.manual || [];
+          shipCfg.synced = cfg.shipping.synced || [];
+          shipCfg.hiddenRates = cfg.shipping.hiddenRates || [];
+          shipCfg.rulesEnabled = cfg.shipping.rulesEnabled === true;
+          shipCfg.rules = cfg.shipping.rules || [];
+          shipCfg.fallbackPrice = parseFloat(cfg.shipping.fallbackPrice) || 0;
+          shipCfg.fallbackLabel =
+            String(cfg.shipping.fallbackLabel || "").trim() || "Delivery charge";
+          shipCfg.freeShippingThreshold =
+            parseFloat(cfg.shipping.freeShippingThreshold) || 0;
+          refreshShipping();
+        } else {
+          shipCfg.manual = cfg.shippingOptions || [];
+          refreshShipping();
+        }
+        offers = cfg.upsells || [];
+        renderOffers();
         renderDialCodes(cfg.dialCodes);
         if (cfg.fields) {
           ["name", "phone", "email", "address", "city", "quantity", "notes"].forEach(function (name) {
@@ -391,8 +710,14 @@
       })
       .catch(function () {});
 
-    formEl.addEventListener("change", renderSummary);
-    formEl.addEventListener("input", renderSummary);
+    // The city drives the dynamic rate and the quantity drives free shipping,
+    // so both have to re-resolve the rates before the summary is redrawn.
+    function onFormChange() {
+      refreshShipping();
+      renderSummary();
+    }
+    formEl.addEventListener("change", onFormChange);
+    formEl.addEventListener("input", onFormChange);
     renderSummary();
 
     formEl.addEventListener("submit", function (e) {
@@ -420,6 +745,14 @@
       payload.append("shippingTitle", sel ? sel.value : "");
       payload.append("shippingPrice", String((shippingCents() / 100).toFixed(2)));
       payload.append("codFee", String((codFee / 100).toFixed(2)));
+      // Only the offer and variant ids travel — the server re-resolves the
+      // offer and prices it itself, so these can't be used to discount an order.
+      payload.append(
+        "upsells",
+        JSON.stringify(chosenOffers().map(function (c) {
+          return { offerId: c.offerId, variantId: c.variantId };
+        })),
+      );
 
       // Guard against the dev tunnel dropping a slow response after the order
       // is already created: on timeout/parse failure we do NOT re-enable the
