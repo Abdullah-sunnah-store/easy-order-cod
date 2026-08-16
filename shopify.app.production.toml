@@ -12,7 +12,7 @@
 
 client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
 name = "Easy order COD"
-application_url = "https://easy-order-cod.fly.dev/app"
+application_url = "https://easy-order-cod.onrender.com/app"
 embedded = true
 handle = "easy-order-cod"
 
@@ -22,7 +22,7 @@ automatically_update_urls_on_dev = false
 # The storefront form calls /apps/cod/settings and /apps/cod/order through this
 # proxy. Without it those paths 404 and no COD order can ever be created.
 [app_proxy]
-url = "https://easy-order-cod.fly.dev/proxy"
+url = "https://easy-order-cod.onrender.com/proxy"
 subpath = "cod"
 prefix = "apps"
 
@@ -58,9 +58,9 @@ scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [
-  "https://easy-order-cod.fly.dev/auth/callback",
-  "https://easy-order-cod.fly.dev/auth/shopify/callback",
-  "https://easy-order-cod.fly.dev/api/auth/callback"
+  "https://easy-order-cod.onrender.com/auth/callback",
+  "https://easy-order-cod.onrender.com/auth/shopify/callback",
+  "https://easy-order-cod.onrender.com/api/auth/callback"
 ]
 
 [pos]

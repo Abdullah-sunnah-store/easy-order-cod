@@ -25,10 +25,11 @@ services:
       # Keep in sync with shopify.app.production.toml [access_scopes].
       - key: SCOPES
         value: read_orders,write_orders,read_products,read_shipping
-      # Set to this service's own https URL once Render assigns it, e.g.
-      # https://easy-order-cod.onrender.com — then redeploy.
+      # Render derives the hostname from `name` above, so this is known ahead of
+      # time and needs no second deploy. If Render appends a suffix because the
+      # name is taken, correct this value and redeploy.
       - key: SHOPIFY_APP_URL
-        sync: false
+        value: https://easy-order-cod.onrender.com
       # Neon connection string. Use the POOLED host and keep ?sslmode=require.
       - key: DATABASE_URL
         sync: false

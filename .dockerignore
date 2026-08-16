@@ -11,7 +11,8 @@ build
 .git
 .gitignore
 
-# Local SQLite dev database (production uses the Fly volume)
+# Leftover local SQLite file. The app uses Postgres (Neon) everywhere now, so
+# this is dead weight — never bake it into the image.
 *.sqlite
 *.sqlite-journal
 prisma/dev.sqlite
