@@ -12,7 +12,10 @@
 
 client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
 name = "Easy order COD"
-application_url = "https://easy-order-cod.onrender.com/app"
+# MUST be the bare origin, with no /app path — see the note in shopify.app.toml.
+# A trailing /app registers the compliance webhooks at /app/webhooks/..., which
+# matches no route and fails the HMAC signature check.
+application_url = "https://easy-order-cod.onrender.com"
 embedded = true
 handle = "easy-order-cod"
 
