@@ -39,7 +39,10 @@ if (host === "localhost") {
 
 export default defineConfig({
   server: {
-    allowedHosts: [host],
+    // The tunnel hostname changes on every run and is not what SHOPIFY_APP_URL
+    // points at, so Vite's host check rejects it with 403 unless the tunnel
+    // domains are allowed wholesale.
+    allowedHosts: [host, ".trycloudflare.com", ".loca.lt", ".ngrok-free.app"],
     cors: {
       preflightContinue: true,
     },

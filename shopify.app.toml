@@ -2,7 +2,12 @@
 
 client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
 name = "Easy order COD"
-application_url = "https://fever-jonathan-humidity-pubmed.trycloudflare.com/app"
+# MUST be the bare origin, with no /app path. Relative [[webhooks.subscriptions]]
+# uris are resolved against this value, so a trailing /app registers the
+# compliance webhooks at /app/webhooks/... — which matches no route, and fails
+# Shopify's "Verifies webhooks with HMAC signatures" check. Install still lands
+# on the app UI: routes/_index redirects to /app when ?shop= is present.
+application_url = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com"
 embedded = true
 handle = "easy-order-cod"
 
@@ -16,7 +21,7 @@ automatically_update_urls_on_dev = true
 # The storefront form calls /apps/cod/settings and /apps/cod/order through this
 # proxy. Without it those paths 404 and no COD order can ever be created.
 [app_proxy]
-url = "https://fever-jonathan-humidity-pubmed.trycloudflare.com/proxy"
+url = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/proxy"
 subpath = "cod"
 prefix = "apps"
 
@@ -32,18 +37,28 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
+  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps).
+  #
+  # These are ABSOLUTE on purpose. Relative uris get resolved against
+  # application_url, which is how they ended up registered at
+  # /app/webhooks/... and failed Shopify's HMAC signature check. An absolute
+  # https URL cannot be rewritten by application_url, so what Shopify probes is
+  # exactly what is written here.
+  #
+  # Compliance endpoints only change on `shopify app deploy` — `shopify app dev`
+  # updates application_url but does NOT refresh these. Re-deploy when the host
+  # changes, and swap them to the production host before submitting.
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
-  uri = "/webhooks/customers/data_request"
+  uri = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/redact" ]
-  uri = "/webhooks/customers/redact"
+  uri = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "shop/redact" ]
-  uri = "/webhooks/shop/redact"
+  uri = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/webhooks/shop/redact"
 
 [access_scopes]
 # Only what the COD app actually uses: create orders, read orders/products, and
@@ -52,9 +67,9 @@ scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [
-  "https://fever-jonathan-humidity-pubmed.trycloudflare.com/auth/callback",
-  "https://fever-jonathan-humidity-pubmed.trycloudflare.com/auth/shopify/callback",
-  "https://fever-jonathan-humidity-pubmed.trycloudflare.com/api/auth/callback"
+  "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/auth/callback",
+  "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/auth/shopify/callback",
+  "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]
