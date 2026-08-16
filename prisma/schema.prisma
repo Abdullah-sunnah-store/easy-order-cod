@@ -9,12 +9,14 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "postgresql"
-  // Postgres (Neon) in every environment. Render's disk is ephemeral, so a
-  // SQLite file there would be wiped on each deploy — sessions and settings
-  // would vanish. Use a separate Neon database (or branch) for local dev so
-  // development never writes to the live store's data.
-  // Connection string: the POOLED host, keeping ?sslmode=require.
+  provider = "sqlite"
+  // Local dev: file:dev.sqlite (.env). No server to install, no signup.
+  //
+  // Hosting uses Postgres instead — Render's disk is ephemeral, so a SQLite
+  // file there is wiped on every deploy. That conversion (provider, and a
+  // Postgres baseline migration) lives on the `render-postgres` branch, which
+  // is what Render deploys. Schema changes made here must be carried over to
+  // that branch before the next deploy.
   url      = env("DATABASE_URL")
 }
 
