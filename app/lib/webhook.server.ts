@@ -1,58 +1,77 @@
-import { appendFileSync } from "node:fs";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { authenticate } from "../shopify.server";
 
-/**
- * Wrapper around authenticate.webhook that answers 401 for every request it
- * cannot verify as a genuine Shopify webhook.
- *
- * authenticate.webhook distinguishes two failures: a present-but-wrong HMAC
- * gives 401, while missing Shopify headers give 400. Shopify's App Store check
- * ("Verifies webhooks with HMAC signatures") posts an unsigned request and
- * reads anything other than 401 as "this app does not verify signatures", so a
- * 400 fails the check even though the verification itself is correct.
- *
- * Collapsing both to 401 is also the more accurate answer: an unsigned request
- * is unauthenticated, not malformed.
- */
-// TEMPORARY diagnostic: records every webhook request so the exact shape of
-// Shopify's automated check can be inspected. Remove once the check passes.
-const PROBE_LOG =
-  "C:/Users/User/AppData/Local/Temp/claude/C--Users-User-Downloads-store-app/28996d4a-17ad-41c5-b03d-1a8a3c53204a/scratchpad/webhook-probe.log";
+// Webhook authentication, following Shopify's documented HMAC verification:
+// https://shopify.dev/docs/apps/build/webhooks/verify-deliveries#hmac-verification
+//
+// The rules that matter there:
+//   • HMAC-SHA256 the RAW request body, keyed with the app's client secret
+//   • the X-Shopify-Hmac-Sha256 header is base64 — decode before comparing
+//   • compare with a timing-safe equality check, never ===
+//   • reject any delivery whose signatures don't match (400 or 401)
+//   • acknowledge a good delivery with 200; anything outside 2xx counts as an
+//     error, and Shopify gives up after a 5s request timeout
+//
+// authenticate.webhook() already does all of this. The explicit pass below runs
+// first as defence in depth: it fails closed if the library's behaviour ever
+// changes, and it makes the verification auditable in our own code rather than
+// buried in a dependency.
 
-function probe(request: Request, outcome: string) {
+/**
+ * Constant-time comparison of the computed digest against the header value.
+ * Returns false for a missing header, an unset secret, or any length mismatch —
+ * timingSafeEqual throws when the buffers differ in length.
+ */
+function hmacMatches(rawBody: string, headerValue: string | null): boolean {
+  if (!headerValue) return false;
+  const secret = process.env.SHOPIFY_API_SECRET || "";
+  if (!secret) return false;
+
+  const computed = createHmac("sha256", secret).update(rawBody, "utf8").digest();
+  let provided: Buffer;
   try {
-    const h = request.headers;
-    const line =
-      JSON.stringify({
-        at: new Date().toISOString(),
-        method: request.method,
-        url: new URL(request.url).pathname,
-        outcome,
-        topic: h.get("x-shopify-topic"),
-        shop: h.get("x-shopify-shop-domain"),
-        hmac: h.get("x-shopify-hmac-sha256") ? "present" : "ABSENT",
-        apiVersion: h.get("x-shopify-api-version"),
-        webhookId: h.get("x-shopify-webhook-id"),
-        ua: h.get("user-agent"),
-        ct: h.get("content-type"),
-      }) + "\n";
-    appendFileSync(PROBE_LOG, line);
+    provided = Buffer.from(headerValue, "base64");
   } catch {
-    /* diagnostics must never break a webhook */
+    return false;
   }
+  if (provided.length !== computed.length) return false;
+  return timingSafeEqual(computed, provided);
 }
 
+/**
+ * Verifies a webhook delivery and returns the parsed Shopify context.
+ *
+ * Throws a 401 Response for anything that isn't a genuine, correctly signed
+ * delivery — an unsigned probe included. (The library alone answers 400 when the
+ * Shopify headers are absent; the docs permit either, but 401 is the more
+ * accurate description of an unauthenticated request.)
+ */
 export async function authenticateWebhook(request: Request) {
+  // clone() so the body stays unread for authenticate.webhook below — reading
+  // the original would leave it with an empty stream.
+  const rawBody = await request.clone().text();
+  const header = request.headers.get("x-shopify-hmac-sha256");
+
+  if (!hmacMatches(rawBody, header)) {
+    console.warn(
+      "COD: rejected webhook with an invalid signature",
+      JSON.stringify({
+        path: new URL(request.url).pathname,
+        topic: request.headers.get("x-shopify-topic"),
+        shop: request.headers.get("x-shopify-shop-domain"),
+        hmac: header ? "present-but-invalid" : "absent",
+      }),
+    );
+    throw new Response("Unauthorized", { status: 401 });
+  }
+
   try {
-    const result = await authenticate.webhook(request);
-    probe(request, "200 authenticated");
-    return result;
+    return await authenticate.webhook(request);
   } catch (error) {
+    // Keep the status honest if the library rejects it for its own reasons.
     if (error instanceof Response && error.status === 400) {
-      probe(request, "400->401 (no/!bad headers)");
       throw new Response("Unauthorized", { status: 401 });
     }
-    probe(request, error instanceof Response ? `${error.status}` : "threw");
     throw error;
   }
 }
