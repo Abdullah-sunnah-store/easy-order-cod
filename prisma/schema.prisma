@@ -9,8 +9,12 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  // Local dev: file:dev.sqlite (.env). On Fly: file:/data/prod.sqlite (a volume).
+  provider = "postgresql"
+  // Postgres (Neon) in every environment. Render's disk is ephemeral, so a
+  // SQLite file there would be wiped on each deploy — sessions and settings
+  // would vanish. Use a separate Neon database (or branch) for local dev so
+  // development never writes to the live store's data.
+  // Connection string: the POOLED host, keeping ?sslmode=require.
   url      = env("DATABASE_URL")
 }
 

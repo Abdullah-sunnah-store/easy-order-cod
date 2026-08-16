@@ -8,9 +8,11 @@ primary_region = "sin"
 
 [env]
   PORT = "3000"
-  # SQLite on the [[mounts]] volume below, so the database survives deploys.
-  # `npm run setup` runs `prisma migrate deploy` against this at every boot.
-  DATABASE_URL = "file:/data/prod.sqlite"
+  # NOTE: prisma/schema.prisma now uses provider = "postgresql" (the app is
+  # hosted on Render + Neon). A SQLite file URL will NOT work any more. To
+  # deploy here instead, set a Postgres connection string as a secret:
+  #   flyctl secrets set DATABASE_URL='postgresql://...?sslmode=require'
+  # and drop the [[mounts]] volume below, which only existed for SQLite.
   # Must match this app's own https URL, or OAuth redirects land nowhere.
   SHOPIFY_APP_URL = "https://easy-order-cod.fly.dev"
   # Public client id — the same value as [client_id] in shopify.app.toml.

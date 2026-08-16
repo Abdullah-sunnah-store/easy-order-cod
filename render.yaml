@@ -16,8 +16,10 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
+      # Public client id — the same value as client_id in shopify.app.toml, so
+      # it can live here rather than being pasted in by hand.
       - key: SHOPIFY_API_KEY
-        sync: false
+        value: 7d6846fb9f944b6701f6cc35b77eab6f
       - key: SHOPIFY_API_SECRET
         sync: false
       # Keep in sync with shopify.app.production.toml [access_scopes].
