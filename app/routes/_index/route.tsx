@@ -22,9 +22,10 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Easy order COD</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Sell cash on delivery without checkout. Add a one-step order form to
+          any product page and turn browsers into confirmed COD orders.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -40,16 +41,19 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>A COD form on your product pages</strong>. Add the form as a
+            theme block, choose which fields appear, and take the customer's
+            name, phone, city and address without sending them to checkout.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Delivery charges that fit your rates</strong>. Enter your own
+            shipping options, sync the rates already set on your store, or charge
+            by the city the customer types in.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Fewer fake orders</strong>. Block abusive IPs and postal
+            codes, cap how many orders one phone number can place, and add phone
+            confirmation before an order is created.
           </li>
         </ul>
       </div>

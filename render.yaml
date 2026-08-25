@@ -1,15 +1,23 @@
 # Render Blueprint for the Easy order COD app.
 #
-# Deploy: push this repo to GitHub, then Render → New → Blueprint → pick the
-# repo. Render reads this file and creates the service.
-#
-# The four `sync: false` variables are NOT stored here — Render prompts for
-# them on first deploy. Never commit the API secret to the repo.
+# Deploy: Render → New → Blueprint → pick this repo. Render reads this file and
+# creates the service. Everything below is deliberate; read the notes before
+# changing a value.
 services:
   - type: web
     name: easy-order-cod
     runtime: docker
-    plan: free
+    # PIN THE DEPLOY BRANCH. Without this Render deploys whatever branch was
+    # picked in the dashboard, which is how a stale branch (four commits behind,
+    # pinned to the retired 2025-01 API version) became the deployed code while
+    # master held the fixes. There is now one deployable branch: master.
+    branch: master
+    # Starter, NOT free. A free service spins down after ~15 minutes idle and
+    # cold-starts in roughly a minute. Shopify's reviewer opens the embedded app
+    # cold, and App Bridge gives up long before that — which reads as the exact
+    # "app encountered an error" failure this app was already rejected for.
+    # Webhook deliveries time out against a sleeping service too.
+    plan: starter
     region: singapore
     # Every other route demands a Shopify session and would answer a probe with
     # a redirect or a 401, which Render scores as a failed deploy.
@@ -20,6 +28,7 @@ services:
       # it can live here rather than being pasted in by hand.
       - key: SHOPIFY_API_KEY
         value: 7d6846fb9f944b6701f6cc35b77eab6f
+      # Set in the Render dashboard on first deploy. Never commit the secret.
       - key: SHOPIFY_API_SECRET
         sync: false
       # Keep in sync with shopify.app.production.toml [access_scopes].
@@ -27,9 +36,11 @@ services:
         value: read_orders,write_orders,read_products,read_shipping
       # Render derives the hostname from `name` above, so this is known ahead of
       # time and needs no second deploy. If Render appends a suffix because the
-      # name is taken, correct this value and redeploy.
+      # name is taken, correct this value AND the three URLs in
+      # shopify.app.production.toml, then redeploy and re-release.
       - key: SHOPIFY_APP_URL
         value: https://easy-order-cod.onrender.com
-      # Neon connection string. Use the POOLED host and keep ?sslmode=require.
+      # Neon connection string, set in the dashboard. Use the POOLED host and
+      # keep ?sslmode=require. `npm run setup` applies migrations at boot.
       - key: DATABASE_URL
         sync: false

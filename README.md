@@ -1,3 +1,27 @@
+# Easy order COD
+
+Cash-on-delivery order forms for Shopify storefronts.
+
+**Hosting, releasing and App Store resubmission: see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).**
+Read it before running `shopify app deploy` - the app has already been rejected
+once for releasing a version whose URL pointed at a host that was not running.
+
+Quick reference:
+
+| Task | Command |
+| --- | --- |
+| Local development | `npm run dev` |
+| End a dev session | `shopify app dev clean` |
+| Verify a release is safe | `npm run check:release` |
+| Release to Shopify | `npm run deploy` |
+
+Storage is Postgres (Neon) in every environment, defined in `prisma/schema.prisma`.
+Copy `.env.example` to `.env` and point `DATABASE_URL` at a Neon dev branch.
+
+---
+
+The template README follows.
+
 # Shopify App Template - Remix
 
 > [!NOTE]
@@ -83,8 +107,9 @@ Please read the [documentation for @shopify/shopify-app-remix](https://www.npmjs
 
 ### Application Storage
 
-This template uses [Prisma](https://www.prisma.io/) to store session data, by default using an [SQLite](https://www.sqlite.org/index.html) database.
-The database is defined as a Prisma schema in `prisma/schema.prisma`.
+This app uses [Prisma](https://www.prisma.io/) to store session data in Postgres.
+The database is defined as a Prisma schema in `prisma/schema.prisma`. SQLite is
+deliberately not used, in development or production - see docs/DEPLOYMENT.md.
 
 This use of SQLite works in production if your app runs as a single instance.
 The database that works best for you depends on the data your app needs and how it is queried.
