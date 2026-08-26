@@ -1,4 +1,5 @@
 import { vitePlugin as remix } from "@remix-run/dev";
+import { vercelPreset } from "@vercel/remix/vite";
 import { installGlobals } from "@remix-run/node";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -57,6 +58,13 @@ export default defineConfig({
   },
   plugins: [
     remix({
+      // Build for Vercel's Node runtime. Without this preset the build only
+      // produces a plain Remix server bundle; Vercel then wraps it in a
+      // function with no handler to call and every request - the embedded
+      // iframe included - answers 500 FUNCTION_INVOCATION_FAILED. That is
+      // the error the App Store reviewer hit. The preset is version-locked
+      // to @remix-run/dev (both 2.16.7); it declares that as an exact peer.
+      presets: [vercelPreset()],
       ignoredRouteFiles: ["**/.*"],
       future: {
         v3_fetcherPersist: true,

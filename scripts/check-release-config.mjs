@@ -224,9 +224,14 @@ if (!skipLive && origin && failures.length === 0) {
           res.status +
           ", expected 200. Nothing usable is serving the production hostname - releasing now would repeat the rejection.",
       );
-      if (res.headers.get("x-render-routing") === "no-server") {
+      if (res.headers.get("x-vercel-error")) {
         fail(
-          "Render reports x-render-routing: no-server - the service does not exist. Create it from render.yaml before releasing.",
+          "Vercel reports x-vercel-error: " +
+            res.headers.get("x-vercel-error") +
+            ". The deployment is not serving. FUNCTION_INVOCATION_FAILED " +
+            "almost always means a missing environment variable " +
+            "(SHOPIFY_API_KEY, SHOPIFY_API_SECRET, DATABASE_URL) - check the " +
+            "runtime logs for the deployment before releasing.",
         );
       }
     } else {

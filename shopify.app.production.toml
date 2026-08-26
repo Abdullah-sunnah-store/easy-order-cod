@@ -1,18 +1,24 @@
-# Release configuration — the URLs that ship to the App Store.
+# Release configuration - the URLs that ship to the App Store.
+#
+# Every URL below must point at the permanent production host and nothing
+# else. A released version carrying a dev tunnel is what the App Store
+# reviewer hit: the tunnel had stopped resolving, so the embedded iframe
+# rendered Chrome's "server IP address could not be found" and the review
+# failed under 2.3.3 and 2.1.1.
+#
+# The host is Vercel: https://easy-order-cod.vercel.app
 #
 # `shopify app dev` rewrites the URL fields of whichever config is active, so
 # keep development on shopify.app.toml and release from this file:
 #
-#   shopify app config use production
-#   shopify app deploy
-#   shopify app config use shopify.app.toml   # back to dev
+#   npm run deploy          # runs the pre-flight, then releases from here
 #
 # automatically_update_urls_on_dev is false here so a stray `dev` run can never
 # point the published app at a Cloudflare tunnel.
 
 client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
 name = "Easy order COD"
-application_url = "https://easy-order-cod.onrender.com/app"
+application_url = "https://easy-order-cod.vercel.app/app"
 embedded = true
 handle = "easy-order-cod"
 
@@ -22,7 +28,7 @@ automatically_update_urls_on_dev = false
 # The storefront form calls /apps/cod/settings and /apps/cod/order through this
 # proxy. Without it those paths 404 and no COD order can ever be created.
 [app_proxy]
-url = "https://easy-order-cod.onrender.com/proxy"
+url = "https://easy-order-cod.vercel.app/proxy"
 subpath = "cod"
 prefix = "apps"
 
@@ -58,9 +64,9 @@ scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [
-  "https://easy-order-cod.onrender.com/auth/callback",
-  "https://easy-order-cod.onrender.com/auth/shopify/callback",
-  "https://easy-order-cod.onrender.com/api/auth/callback"
+  "https://easy-order-cod.vercel.app/auth/callback",
+  "https://easy-order-cod.vercel.app/auth/shopify/callback",
+  "https://easy-order-cod.vercel.app/api/auth/callback"
 ]
 
 [pos]

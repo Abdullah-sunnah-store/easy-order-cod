@@ -20,14 +20,22 @@ A second, compounding defect: the branch Render was pointed at,
 the retired `2025-01` Admin API version and no explicit webhook HMAC
 verification. Both are independent review failures.
 
-The rules below exist so neither can recur.
+The host is now **Vercel**: <https://easy-order-cod.vercel.app>. Its first
+deployment answered `500 FUNCTION_INVOCATION_FAILED` on every route, for two
+reasons that the rules below now prevent:
+
+- the build had no Vercel adapter, so nothing packaged the Remix server bundle
+  into a function Vercel could call (`vercelPreset()` in `vite.config.ts`);
+- the environment variables were unset, so `app/shopify.server.ts` threw while
+  the module was still loading — which takes down every route, `/healthz`
+  included.
 
 ## The invariants
 
-1. **One deployable branch: `master`.** `render.yaml` pins `branch: master`.
-   There is no separate database branch any more — Postgres is the Prisma
-   provider in every environment, so there is one schema and one migration
-   history.
+1. **One deployable branch: `master`.** It is the Vercel project's Production
+   Branch; every push to it redeploys. There is no separate database branch any
+   more — Postgres is the Prisma provider in every environment, so there is one
+   schema and one migration history.
 2. **The released version comes from `shopify.app.production.toml`, never
    `shopify.app.toml`.** `npm run deploy` passes `--config production`
    explicitly, and that file carries `automatically_update_urls_on_dev = false`.
@@ -36,42 +44,63 @@ The rules below exist so neither can recur.
    tunnel or non-HTTPS, if the proxy or OAuth callbacks are on a different
    origin from `application_url`, if the Admin API version disagrees between
    `shopify.app.production.toml`, the theme extension and `app/shopify.server.ts`,
-   or if `https://<production host>/healthz` does not answer `200`.
-4. **The host must never sleep.** Render is on the `starter` plan. A free
-   service spins down after ~15 minutes idle and cold-starts in roughly a
-   minute; a reviewer opening the embedded app cold hits an App Bridge timeout,
-   which reads as exactly the error this app was already rejected for. Webhook
-   deliveries time out against a sleeping service too.
+   or if `https://<production host>/healthz` does not answer `200`. It reports
+   any `x-vercel-error` it sees, which names the failure directly.
+4. **Release against the production alias, never a deployment URL.**
+   `easy-order-cod.vercel.app` always points at the current production
+   deployment. The per-deployment `…-<hash>-<team>.vercel.app` URLs are
+   throwaway and may sit behind Deployment Protection — a released version
+   carrying one is another dead link.
 
 ## First-time setup
 
 ### 1. Database (Neon)
 
-1. Create a project at <https://neon.tech> (the free tier is enough to start).
+1. Create a project at <https://neon.tech> (the free tier is enough to start),
+   or add Neon from the Vercel dashboard under **Storage**, which sets
+   `DATABASE_URL` on the project for you.
 2. Create **two branches**: `production` and `dev`. Development must never write
    to live merchant data.
 3. Copy each branch's **pooled** connection string — the host containing
    `-pooler` — keeping `?sslmode=require`.
 4. Put the `dev` one in your local `.env` (see `.env.example`).
 
-### 2. Host (Render)
+### 2. Host (Vercel)
 
-1. Render → **New → Blueprint** → pick this repository. It reads `render.yaml`
-   and creates the service on the `starter` plan, pinned to `master`.
-2. When prompted, set the two secrets Render does not store in the repo:
-   - `SHOPIFY_API_SECRET` — Partner Dashboard → your app → API credentials.
-   - `DATABASE_URL` — the Neon **production** pooled connection string.
-3. Wait for the first deploy. `npm run docker-start` runs `prisma migrate deploy`
-   at boot, so the schema is created automatically.
-4. Confirm the host is genuinely serving before going near Shopify:
+1. Vercel → **Add New → Project** → import this repository. The settings in
+   `vercel.json` (framework, install and build commands) are read from the repo;
+   leave the dashboard's Build & Development Settings on their defaults.
+2. **Settings → Git → Production Branch: `master`.**
+3. **Settings → Environment Variables** — add all four to *Production* (and to
+   *Preview* if you use preview deployments). The app refuses to boot without
+   them and says which one is missing:
+
+   | Variable | Value |
+   | --- | --- |
+   | `SHOPIFY_API_KEY` | `7d6846fb9f944b6701f6cc35b77eab6f` (the `client_id`) |
+   | `SHOPIFY_API_SECRET` | Partner Dashboard → your app → API credentials |
+   | `SCOPES` | `read_orders,write_orders,read_products,read_shipping` |
+   | `DATABASE_URL` | the Neon **production** pooled connection string |
+
+   `SHOPIFY_APP_URL` is optional: unset, the app falls back to Vercel's
+   `VERCEL_PROJECT_PRODUCTION_URL`, which is the production alias. Set it
+   explicitly once a custom domain is in play.
+4. Redeploy. `npm run vercel-build` runs `prisma migrate deploy` on the build
+   machine, so the schema is created automatically — which also means a bad
+   `DATABASE_URL` fails the build loudly instead of shipping a broken app.
+5. Confirm the host is genuinely serving before going near Shopify:
 
    ```shell
-   curl -i https://easy-order-cod.onrender.com/healthz    # expect: 200, body "ok"
+   curl -i https://easy-order-cod.vercel.app/healthz    # expect: 200, body "ok"
    ```
 
-   If Render appended a suffix to the hostname because `easy-order-cod` was
-   taken, correct `SHOPIFY_APP_URL` in `render.yaml` **and** all five URLs in
-   `shopify.app.production.toml`, then redeploy.
+   Anything else — especially `x-vercel-error: FUNCTION_INVOCATION_FAILED` —
+   means the deployment is not serving. Open the deployment's **Runtime Logs**;
+   a missing environment variable names itself there.
+
+   If the project's production alias is not `easy-order-cod.vercel.app`
+   (Vercel appends a suffix when the name is taken), correct all five URLs in
+   `shopify.app.production.toml` to match before releasing.
 
 ### 3. Release to Shopify
 
@@ -119,8 +148,8 @@ Because there is a single Postgres migration history, this is now ordinary:
 npx prisma migrate dev --name describe_the_change
 ```
 
-Commit the generated folder under `prisma/migrations/`. Render applies it on the
-next deploy via `npm run setup`. Never hand-edit an applied migration.
+Commit the generated folder under `prisma/migrations/`. Vercel applies it on the
+next deploy via `npm run vercel-build`. Never hand-edit an applied migration.
 
 ## Optional: a separate development app
 
