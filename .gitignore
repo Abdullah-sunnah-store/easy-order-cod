@@ -30,3 +30,4 @@ pnpm-lock.yaml
 # Leftover local SQLite file from before Postgres became the only provider.
 *.sqlite
 *.sqlite-journal
+.env*

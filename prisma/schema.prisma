@@ -17,17 +17,24 @@ datasource db {
   provider = "postgresql"
   // Postgres in EVERY environment, local development included.
   //
-  // Render's disk is ephemeral, so a SQLite file on the host is wiped on each
-  // deploy and every merchant session with it. Postgres also has to be the
-  // provider here rather than only on a deploy branch: Prisma migrations are
-  // provider-specific SQL, so a second provider means a second migration
-  // history, and the two drift. That drift is what left the deployed branch
-  // four commits behind with a retired API version.
+  // A Vercel function has no writable disk that survives the request, so a
+  // SQLite file would take every merchant session with it. Postgres also has
+  // to be the provider here rather than only on a deploy branch: Prisma
+  // migrations are provider-specific SQL, so a second provider means a second
+  // migration history, and the two drift. That drift is what left the deployed
+  // branch four commits behind with a retired API version.
   //
   // One schema, one migration history, one deployable branch. Point
   // DATABASE_URL at a separate Neon branch for local dev so development never
   // writes to live merchant data. Use the POOLED host, keep ?sslmode=require.
   url      = env("DATABASE_URL")
+  // Migrations must not run through the connection pooler: `prisma migrate
+  // deploy` takes a session-level advisory lock, and PgBouncer hands each
+  // statement a different backend, so the lock is taken on one connection and
+  // looked for on another. Neon publishes the direct host as
+  // DATABASE_URL_UNPOOLED, which the Vercel integration sets alongside the
+  // pooled one. Runtime still uses the pooled URL above.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Session {
