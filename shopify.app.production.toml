@@ -14,26 +14,18 @@ client_id = "7d6846fb9f944b6701f6cc35b77eab6f"
 name = "Easy order COD"
 # MUST be the bare origin, with no /app path — see the note in shopify.app.toml.
 # A trailing /app registers the compliance webhooks at /app/webhooks/..., which
-# matches no route: /app/* is the embedded admin layout, and the webhook routes
-# live at /webhooks/*. That is what returned 404 to Shopify's probe.
-#
-# Host is Vercel. The earlier Render and Fly deployments are gone — render.yaml
-# and fly.toml are left over from those and are not what serves the app.
-application_url = "https://easy-order-cod.vercel.app"
+# matches no route and fails the HMAC signature check.
+application_url = "https://easy-order-cod.onrender.com"
 embedded = true
 handle = "easy-order-cod"
 
 [build]
 automatically_update_urls_on_dev = false
 
-# The storefront form reads /apps/cod/settings through this proxy. Without it
-# that path 404s and the form falls back to its built-in defaults.
-#
-# There is deliberately no order endpoint here any more: the form builds a
-# Shopify cart and hands off to Shopify checkout, which is what creates the
-# order (App Store requirement 1.1.2).
+# The storefront form calls /apps/cod/settings and /apps/cod/order through this
+# proxy. Without it those paths 404 and no COD order can ever be created.
 [app_proxy]
-url = "https://easy-order-cod.vercel.app/proxy"
+url = "https://easy-order-cod.onrender.com/proxy"
 subpath = "cod"
 prefix = "apps"
 
@@ -49,48 +41,29 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  # Shopify creates COD orders at its own checkout now, so this webhook is the
-  # only way the app learns that one happened. It backs the Orders page and the
-  # plan's monthly allowance; the handler ignores every order whose cart is not
-  # marked with the COD "Order type" attribute.
-  [[webhooks.subscriptions]]
-  topics = [ "orders/create" ]
-  uri = "/webhooks/orders/create"
-
-  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps).
-  #
-  # ABSOLUTE on purpose. A relative uri is resolved against application_url at
-  # deploy time, so an application_url that ends in /app registers these at
-  # /app/webhooks/... — a path this app has no route for, which is why Shopify's
-  # probe came back 404. An absolute https URL cannot be re-prefixed, so what
-  # Shopify calls is exactly what is written here.
-  #
-  # These only change on `shopify app deploy`. Re-deploy whenever the host moves.
+  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
-  uri = "https://easy-order-cod.vercel.app/webhooks/customers/data_request"
+  uri = "/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/redact" ]
-  uri = "https://easy-order-cod.vercel.app/webhooks/customers/redact"
+  uri = "/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "shop/redact" ]
-  uri = "https://easy-order-cod.vercel.app/webhooks/shop/redact"
+  uri = "/webhooks/shop/redact"
 
 [access_scopes]
-# Only what the COD app actually uses. write_orders and read_shipping are gone:
-# the app no longer creates orders or quotes shipping — Shopify checkout does
-# both (App Store requirement 1.1.2). read_orders backs the Orders page and the
-# orders/create webhook; write_discounts backs the upsell offers, whose
-# percentages are now real Shopify discounts applied at checkout.
-scopes = "read_orders,read_products,read_discounts,write_discounts"
+# Only what the COD app actually uses: create orders, read orders/products, and
+# read the shop's shipping zones for the Form builder's auto-synced rates.
+scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [
-  "https://easy-order-cod.vercel.app/auth/callback",
-  "https://easy-order-cod.vercel.app/auth/shopify/callback",
-  "https://easy-order-cod.vercel.app/api/auth/callback"
+  "https://easy-order-cod.onrender.com/auth/callback",
+  "https://easy-order-cod.onrender.com/auth/shopify/callback",
+  "https://easy-order-cod.onrender.com/api/auth/callback"
 ]
 
 [pos]

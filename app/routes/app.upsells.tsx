@@ -27,10 +27,6 @@ import {
   deleteUpsell,
   toggleUpsell,
 } from "../models/upsells.server";
-import {
-  removeOfferDiscount,
-  syncOfferDiscount,
-} from "../models/offerDiscounts.server";
 import { getActivePlan } from "../models/billing.server";
 import { upsellLimit } from "../lib/plans";
 import { formatMoney, getMoneyFormat } from "../lib/money";
@@ -66,7 +62,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!offerProductId) {
       return { ok: false, error: "Pick the product or collection to offer." };
     }
-    const created = await createUpsell(session.shop, {
+    await createUpsell(session.shop, {
       title: String(form.get("title") || "Special offer"),
       type: String(form.get("type") || "bump"),
       offerKind: String(form.get("offerKind") || "product"),
@@ -81,27 +77,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       discountPercent: parseInt(String(form.get("discountPercent") || "0"), 10) || 0,
       minQuantity: parseInt(String(form.get("minQuantity") || "1"), 10) || 1,
     });
-    // The percentage is applied by a real Shopify discount at checkout — the
-    // app can no longer price the line itself. A failure here leaves the offer
-    // in place at full price rather than blocking the save.
-    await syncOfferDiscount(admin, created.id);
     return { ok: true, created: true };
   }
   if (intent === "delete") {
-    const id = String(form.get("id"));
-    // Retire the Shopify discount before the row goes, or the code is orphaned
-    // in the merchant's admin with nothing left pointing at it.
-    const offer = (await listUpsells(session.shop)).find((u) => u.id === id);
-    if (offer) await removeOfferDiscount(admin, offer);
-    await deleteUpsell(session.shop, id);
+    await deleteUpsell(session.shop, String(form.get("id")));
     return { ok: true };
   }
   if (intent === "toggle") {
-    const id = String(form.get("id"));
-    await toggleUpsell(session.shop, id, form.get("enabled") === "true");
-    // Switching an offer off must switch its discount off too, or the code
-    // keeps working for anyone who saved it.
-    await syncOfferDiscount(admin, id);
+    await toggleUpsell(session.shop, String(form.get("id")), form.get("enabled") === "true");
     return { ok: true };
   }
   return { ok: false };

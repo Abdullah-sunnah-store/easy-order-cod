@@ -20,7 +20,16 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { getCodSettings, updateCodSettings } from "../models/codSettings.server";
+import { syncShopifyRates } from "../models/shippingSync.server";
 import { formatMoney, getMoneyFormat } from "../lib/money";
+import type { ShipMode, ShipOption, ShipRule } from "../lib/shipping";
+import {
+  DEFAULT_FALLBACK_LABEL,
+  isRateHidden,
+  parseJsonArray,
+  qualifiesForFreeShipping,
+  resolveShippingOptions,
+} from "../lib/shipping";
 
 // ---- Builder appearance config (stored as JSON in CodSettings.builderConfig) ----
 // Everything here is forwarded verbatim to the storefront by proxy.settings.tsx
@@ -138,6 +147,8 @@ const ICONS: Record<Exclude<Builder["buttonIcon"], "none">, string> = {
   shield: "M12 2 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6l-8-4Z",
 };
 
+export type { ShipOption, ShipRule } from "../lib/shipping";
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const s = await getCodSettings(session.shop);
@@ -147,27 +158,68 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {
     /* keep defaults */
   }
-  // The shop's own money format, so the preview renders the subtotal exactly as
-  // the storefront will.
+  const shipping = parseJsonArray<ShipOption>(s.shippingOptions);
+  const synced = parseJsonArray<ShipOption>(s.shippingSynced);
+  const hiddenRates = parseJsonArray<string>(s.shippingHiddenRates);
+  const rules = parseJsonArray<ShipRule>(s.shippingRules);
+
+  // The shop's own money format, so the preview renders totals exactly as the
+  // storefront will.
   const moneyFormat = await getMoneyFormat(admin);
 
-  return { settings: s, builder, moneyFormat };
+  return {
+    settings: s,
+    builder,
+    shipping,
+    synced,
+    hiddenRates,
+    rules,
+    syncedAt: s.shippingSyncedAt ? s.shippingSyncedAt.toISOString() : null,
+    moneyFormat,
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const form = await request.formData();
 
+  // "Sync now" — pull the shop's own shipping zones instead of saving the form.
+  if (form.get("intent") === "sync") {
+    try {
+      const { rates, syncedAt } = await syncShopifyRates(admin, session.shop);
+      return {
+        ok: true as const,
+        synced: rates,
+        syncedAt: syncedAt.toISOString(),
+      };
+    } catch (e: any) {
+      return {
+        ok: false as const,
+        // Most often a missing read_shipping grant on an install that predates it.
+        syncError:
+          String(e?.message || "").includes("access denied") ||
+          String(e?.message || "").includes("scope")
+            ? "This app needs permission to read your shipping settings. Reinstall or reopen the app to approve it, then sync again."
+            : "Couldn't read your Shopify shipping rates. Please try again.",
+      };
+    }
+  }
+
   const asBool = (n: string) => form.get(n) === "true";
+  const asNum = (n: string) => Math.max(0, Number(form.get(n)) || 0);
   await updateCodSettings(session.shop, {
     enabled: asBool("enabled"),
     headingText: String(form.get("headingText") || ""),
+    successMessage: String(form.get("successMessage") || ""),
     orderTag: String(form.get("orderTag") || "COD"),
-    // Quantity and note are the only fields left. Name, email, phone, address
-    // and city are collected by Shopify checkout — App Store requirement 1.1.2.
+    showName: asBool("showName"),
+    showEmail: asBool("showEmail"),
+    showPhone: asBool("showPhone"),
+    showAddress: asBool("showAddress"),
+    showCity: asBool("showCity"),
     showQuantity: asBool("showQuantity"),
     showNotes: asBool("showNotes"),
-    checkoutNotice: String(form.get("checkoutNotice") || ""),
+    dialCodes: String(form.get("dialCodes") || ""),
     builderConfig: String(form.get("builderConfig") || "{}"),
     // Moved here from the theme block's schema — the theme editor no longer
     // exposes any of these.
@@ -176,6 +228,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       0,
       parseInt(String(form.get("countdownMinutes") || "0"), 10) || 0,
     ),
+    shippingOptions: String(form.get("shippingOptions") || "[]"),
+    shippingMode: String(form.get("shippingMode") || "manual"),
+    shippingAutoSync: asBool("shippingAutoSync"),
+    shippingHiddenRates: String(form.get("shippingHiddenRates") || "[]"),
+    shippingRulesEnabled: asBool("shippingRulesEnabled"),
+    shippingRules: String(form.get("shippingRules") || "[]"),
+    shippingFallbackPrice: asNum("shippingFallbackPrice"),
+    shippingFallbackLabel: String(
+      form.get("shippingFallbackLabel") || DEFAULT_FALLBACK_LABEL,
+    ),
+    // Also editable on Fraud & delivery — same column, whichever page saves last.
+    freeShippingThreshold: asNum("freeShippingThreshold"),
   });
   return { ok: true as const };
 };
@@ -220,19 +284,53 @@ function SectionTitle({ title, help }: { title: string; help?: string }) {
 }
 
 export default function FormBuilder() {
-  const { settings, builder, moneyFormat } = useLoaderData<typeof loader>();
+  const {
+    settings,
+    builder,
+    shipping,
+    synced,
+    hiddenRates,
+    rules,
+    syncedAt,
+    moneyFormat,
+  } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  // Separate fetcher so a rate sync doesn't fire the "Saved" toast.
+  const syncFetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
+  const [ship, setShip] = useState<ShipOption[]>(shipping);
+  const [shipMode, setShipMode] = useState<ShipMode>(
+    (settings.shippingMode as ShipMode) || "manual",
+  );
+  const [autoSync, setAutoSync] = useState(settings.shippingAutoSync);
+  const [syncedRates, setSyncedRates] = useState<ShipOption[]>(synced);
+  const [hidden, setHidden] = useState<string[]>(hiddenRates);
+  const [syncedStamp, setSyncedStamp] = useState<string | null>(syncedAt);
+  const [rulesOn, setRulesOn] = useState(settings.shippingRulesEnabled);
+  const [shipRules, setShipRules] = useState<ShipRule[]>(rules);
+  const [fallback, setFallback] = useState({
+    price: settings.shippingFallbackPrice,
+    label: settings.shippingFallbackLabel || DEFAULT_FALLBACK_LABEL,
+  });
+  const [freeOver, setFreeOver] = useState(settings.freeShippingThreshold);
+  // Sample city used only by the preview, to show what a customer would see.
+  const [previewCity, setPreviewCity] = useState("");
   const [content, setContent] = useState({
     enabled: settings.enabled,
     headingText: settings.headingText,
+    successMessage: settings.successMessage,
     orderTag: settings.orderTag,
     currencySymbol: settings.currencySymbol,
     countdownMinutes: settings.countdownMinutes,
-    checkoutNotice: settings.checkoutNotice,
+    showName: settings.showName,
+    showEmail: settings.showEmail,
+    showPhone: settings.showPhone,
+    showAddress: settings.showAddress,
+    showCity: settings.showCity,
     showQuantity: settings.showQuantity,
     showNotes: settings.showNotes,
+    dialCodes: (settings as any).dialCodes ?? "",
   });
   const [b, setB] = useState<Builder>(builder);
   const [tab, setTab] = useState(0);
@@ -241,9 +339,28 @@ export default function FormBuilder() {
     ["loading", "submitting"].includes(fetcher.state) &&
     fetcher.formMethod === "POST";
 
+  const syncing = ["loading", "submitting"].includes(syncFetcher.state);
+
   useEffect(() => {
     if (fetcher.data?.ok) shopify.toast.show("Saved");
   }, [fetcher.data, shopify]);
+
+  // Fold a finished sync into local state so the list updates without a reload.
+  useEffect(() => {
+    const d = syncFetcher.data;
+    if (!d) return;
+    if (d.ok && "synced" in d && d.synced) {
+      setSyncedRates(d.synced);
+      setSyncedStamp(d.syncedAt ?? null);
+      shopify.toast.show(
+        d.synced.length
+          ? `Synced ${d.synced.length} rate${d.synced.length === 1 ? "" : "s"} from Shopify`
+          : "No flat shipping rates found in your Shopify shipping zones",
+      );
+    } else if (!d.ok && "syncError" in d && d.syncError) {
+      shopify.toast.show(d.syncError, { isError: true });
+    }
+  }, [syncFetcher.data, shopify]);
 
   const setC = (k: keyof typeof content) => (v: string | boolean) =>
     setContent((p) => ({ ...p, [k]: v }));
@@ -253,8 +370,73 @@ export default function FormBuilder() {
     const fd = new FormData();
     Object.entries(content).forEach(([k, v]) => fd.append(k, String(v)));
     fd.append("builderConfig", JSON.stringify(b));
+    // Drop unnamed rows so a blank line never renders as a shipping choice.
+    fd.append(
+      "shippingOptions",
+      JSON.stringify(
+        ship
+          .filter((o) => o.name.trim() !== "")
+          .map((o) => ({ name: o.name.trim(), price: Number(o.price) || 0 })),
+      ),
+    );
+    fd.append("shippingMode", shipMode);
+    fd.append("shippingAutoSync", String(autoSync));
+    fd.append("shippingHiddenRates", JSON.stringify(hidden));
+    fd.append("shippingRulesEnabled", String(rulesOn));
+    // A rule with no cities can never match — drop it rather than store a row
+    // that silently does nothing.
+    fd.append(
+      "shippingRules",
+      JSON.stringify(
+        shipRules
+          .filter((r) => r.cities.trim() !== "")
+          .map((r) => ({
+            cities: r.cities.trim(),
+            price: Number(r.price) || 0,
+            label: r.label.trim() || DEFAULT_FALLBACK_LABEL,
+          })),
+      ),
+    );
+    fd.append("shippingFallbackPrice", String(Number(fallback.price) || 0));
+    fd.append("shippingFallbackLabel", fallback.label.trim() || DEFAULT_FALLBACK_LABEL);
+    fd.append("freeShippingThreshold", String(Number(freeOver) || 0));
     fetcher.submit(fd, { method: "POST" });
   };
+
+  const syncNow = () =>
+    syncFetcher.submit({ intent: "sync" }, { method: "POST" });
+
+  const setShipAt = (i: number, patch: Partial<ShipOption>) =>
+    setShip((prev) => prev.map((o, n) => (n === i ? { ...o, ...patch } : o)));
+
+  // Ticked = shown, so switching a rate on removes it from the hidden list.
+  const toggleRate = (name: string, show: boolean) =>
+    setHidden((prev) => {
+      const without = prev.filter(
+        (h) => h.trim().toLowerCase() !== name.trim().toLowerCase(),
+      );
+      return show ? without : [...without, name];
+    });
+
+  const setRuleAt = (i: number, patch: Partial<ShipRule>) =>
+    setShipRules((prev) => prev.map((r, n) => (n === i ? { ...r, ...patch } : r)));
+
+  // What a customer would actually see, given the mode, the rules and the city
+  // typed into the preview box.
+  const previewOptions = resolveShippingOptions(
+    {
+      mode: shipMode,
+      manual: ship,
+      synced: syncedRates,
+      hiddenRates: hidden,
+      rulesEnabled: rulesOn,
+      rules: shipRules,
+      fallbackPrice: Number(fallback.price) || 0,
+      fallbackLabel: fallback.label,
+      freeShippingThreshold: Number(freeOver) || 0,
+    },
+    previewCity,
+  );
 
   const reset = () => setB(DEFAULT_BUILDER);
 
@@ -263,6 +445,7 @@ export default function FormBuilder() {
     { id: "button", content: "Buy button" },
     { id: "modal", content: "Modal" },
     { id: "fields", content: "Fields" },
+    { id: "shipping", content: "Shipping" },
     { id: "content", content: "Content" },
   ];
 
@@ -427,14 +610,26 @@ export default function FormBuilder() {
 
                 {tab === 3 && (
                   <BlockStack gap="400">
-                    <SectionTitle
-                      title="Visible fields"
-                      help="The customer's name, email, phone and delivery address are collected by Shopify checkout, so this form no longer asks for them."
-                    />
+                    <SectionTitle title="Visible fields" help="Name, phone and address are always required to create the order." />
                     <InlineGrid columns={{ xs: 1, sm: 2 }} gap="200">
+                      <Checkbox label="Full name" checked={content.showName} onChange={setC("showName")} />
+                      <Checkbox label="Email" checked={content.showEmail} onChange={setC("showEmail")} />
+                      <Checkbox label="Phone" checked={content.showPhone} onChange={setC("showPhone")} />
+                      <Checkbox label="Address" checked={content.showAddress} onChange={setC("showAddress")} />
+                      <Checkbox label="City" checked={content.showCity} onChange={setC("showCity")} />
                       <Checkbox label="Quantity" checked={content.showQuantity} onChange={setC("showQuantity")} />
                       <Checkbox label="Order notes" checked={content.showNotes} onChange={setC("showNotes")} />
                     </InlineGrid>
+
+                    {content.showPhone && (
+                      <TextField
+                        label="Phone country codes"
+                        autoComplete="off"
+                        value={content.dialCodes}
+                        onChange={setC("dialCodes")}
+                        helpText="Shown as a dropdown beside the phone field. Comma-separated; the first one is preselected. Customers can type a local number like 01709504746 and it is sent as +8801709504746. Leave empty to hide the dropdown."
+                      />
+                    )}
 
                     <Divider />
                     <SectionTitle title="Field style" />
@@ -468,34 +663,286 @@ export default function FormBuilder() {
                       <ColorField label="Background" value={b.submitBg} onChange={setBuild("submitBg")} />
                       <ColorField label="Text color" value={b.submitTextColor} onChange={setBuild("submitTextColor")} />
                     </InlineGrid>
-                    <Checkbox
-                      label="Show the subtotal on the button"
-                      checked={b.submitShowTotal}
-                      onChange={setBuild("submitShowTotal")}
-                      helpText="Shipping and taxes aren't known until Shopify quotes them at checkout, so the button shows the subtotal."
-                    />
+                    <Checkbox label="Show order total on the button" checked={b.submitShowTotal} onChange={setBuild("submitShowTotal")} />
                   </BlockStack>
                 )}
 
                 {tab === 4 && (
                   <BlockStack gap="400">
+                    <SectionTitle
+                      title="Where rates come from"
+                      help="Auto-sync reads the rates you already set up in Shopify → Settings → Shipping and delivery. Custom rates are the ones you type below. Pick “Both” to offer them together."
+                    />
+                    <InlineStack gap="300">
+                      {(
+                        [
+                          ["manual", "Custom rates"],
+                          ["auto", "Auto-sync from Shopify"],
+                          ["both", "Both"],
+                        ] as const
+                      ).map(([mode, label]) => (
+                        <Button
+                          key={mode}
+                          pressed={shipMode === mode}
+                          onClick={() => setShipMode(mode)}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </InlineStack>
+
+                    {(shipMode === "auto" || shipMode === "both") && (
+                      <Box
+                        padding="300"
+                        background="bg-surface-secondary"
+                        borderRadius="200"
+                      >
+                        <BlockStack gap="300">
+                          <InlineStack gap="300" blockAlign="center">
+                            <Button onClick={syncNow} loading={syncing}>
+                              Sync now
+                            </Button>
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {syncedStamp
+                                ? `Last synced ${new Date(syncedStamp).toLocaleString()}`
+                                : "Not synced yet"}
+                            </Text>
+                          </InlineStack>
+
+                          {syncedRates.length === 0 ? (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              No synced rates yet. Press “Sync now” to pull the flat
+                              rates from your Shopify shipping zones. Carrier-calculated
+                              rates can't be synced — they need a real checkout to price.
+                            </Text>
+                          ) : (
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                Untick a rate to keep it off the COD form — useful
+                                for rates you don't deliver cash on delivery.
+                              </Text>
+                              {syncedRates.map((r, i) => {
+                                const shown = !isRateHidden(r.name, hidden);
+                                return (
+                                  <InlineStack
+                                    key={`${r.name}-${i}`}
+                                    align="space-between"
+                                    blockAlign="center"
+                                    wrap={false}
+                                  >
+                                    <Checkbox
+                                      label={r.name}
+                                      checked={shown}
+                                      onChange={(on) => toggleRate(r.name, on)}
+                                    />
+                                    <Text
+                                      as="span"
+                                      variant="bodySm"
+                                      fontWeight="semibold"
+                                      tone={shown ? undefined : "subdued"}
+                                    >
+                                      {formatMoney(
+                                        Number(r.price) || 0,
+                                        moneyFormat,
+                                        content.currencySymbol,
+                                      )}
+                                    </Text>
+                                  </InlineStack>
+                                );
+                              })}
+                            </BlockStack>
+                          )}
+
+                          <Checkbox
+                            label="Keep rates up to date automatically"
+                            helpText="Re-reads your Shopify shipping zones while the storefront form loads (cached for 10 minutes), so a rate you change in Shopify shows up without pressing Sync."
+                            checked={autoSync}
+                            onChange={setAutoSync}
+                          />
+                        </BlockStack>
+                      </Box>
+                    )}
+
+                    {(shipMode === "manual" || shipMode === "both") && (
+                      <>
+                        <Divider />
+                        <SectionTitle
+                          title="Custom rates"
+                          help="Shown as selectable rates on the form. Leave empty to hide the section entirely."
+                        />
+                        {ship.length === 0 && (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            No custom rates yet.
+                          </Text>
+                        )}
+                        {ship.map((o, i) => (
+                          <InlineStack key={i} gap="300" blockAlign="end" wrap={false}>
+                            <div style={{ flex: 2 }}>
+                              <TextField
+                                label={`Option ${i + 1} name`}
+                                autoComplete="off"
+                                value={o.name}
+                                onChange={(v) => setShipAt(i, { name: v })}
+                                placeholder="e.g. Inside city"
+                              />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <TextField
+                                label="Price"
+                                type="number"
+                                autoComplete="off"
+                                value={String(o.price)}
+                                onChange={(v) => setShipAt(i, { price: Number(v) || 0 })}
+                              />
+                            </div>
+                            <Button
+                              tone="critical"
+                              variant="tertiary"
+                              onClick={() => setShip((p) => p.filter((_, n) => n !== i))}
+                            >
+                              Remove
+                            </Button>
+                          </InlineStack>
+                        ))}
+                        <div>
+                          <Button onClick={() => setShip((p) => [...p, { name: "", price: 0 }])}>
+                            Add shipping option
+                          </Button>
+                        </div>
+                      </>
+                    )}
+
+                    <Divider />
+                    <SectionTitle
+                      title="Dynamic rate by city"
+                      help="Prices the delivery from the city the customer types. The first matching rule wins; anything unmatched pays the fallback. The rate updates live as they type."
+                    />
+                    <Checkbox
+                      label="Charge shipping based on the customer's city"
+                      checked={rulesOn}
+                      onChange={setRulesOn}
+                      helpText={
+                        content.showCity
+                          ? undefined
+                          : "The City field is switched off in the Fields tab — turn it on, or every customer pays the fallback rate."
+                      }
+                    />
+                    {rulesOn && (
+                      <BlockStack gap="300">
+                        {shipRules.map((r, i) => (
+                          <InlineStack key={i} gap="300" blockAlign="end" wrap={false}>
+                            <div style={{ flex: 3 }}>
+                              <TextField
+                                label={`Rule ${i + 1} — cities`}
+                                autoComplete="off"
+                                value={r.cities}
+                                onChange={(v) => setRuleAt(i, { cities: v })}
+                                placeholder="Dhaka, Gazipur, Narayanganj"
+                                helpText={i === 0 ? "Comma-separated. Matching ignores case and punctuation." : undefined}
+                              />
+                            </div>
+                            <div style={{ flex: 2 }}>
+                              <TextField
+                                label="Label"
+                                autoComplete="off"
+                                value={r.label}
+                                onChange={(v) => setRuleAt(i, { label: v })}
+                                placeholder="Inside city"
+                              />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <TextField
+                                label="Price"
+                                type="number"
+                                autoComplete="off"
+                                value={String(r.price)}
+                                onChange={(v) => setRuleAt(i, { price: Number(v) || 0 })}
+                              />
+                            </div>
+                            <Button
+                              tone="critical"
+                              variant="tertiary"
+                              onClick={() => setShipRules((p) => p.filter((_, n) => n !== i))}
+                            >
+                              Remove
+                            </Button>
+                          </InlineStack>
+                        ))}
+                        <div>
+                          <Button
+                            onClick={() =>
+                              setShipRules((p) => [
+                                ...p,
+                                { cities: "", price: 0, label: "" },
+                              ])
+                            }
+                          >
+                            Add city rule
+                          </Button>
+                        </div>
+                        <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+                          <TextField
+                            label="Fallback label"
+                            autoComplete="off"
+                            value={fallback.label}
+                            onChange={(v) => setFallback((p) => ({ ...p, label: v }))}
+                            placeholder={DEFAULT_FALLBACK_LABEL}
+                            helpText="Used when the typed city matches no rule."
+                          />
+                          <TextField
+                            label="Fallback price"
+                            type="number"
+                            autoComplete="off"
+                            value={String(fallback.price)}
+                            onChange={(v) => setFallback((p) => ({ ...p, price: Number(v) || 0 }))}
+                          />
+                        </InlineGrid>
+                      </BlockStack>
+                    )}
+
+                    <Divider />
+                    <SectionTitle title="Free shipping" />
+                    <TextField
+                      label="Free shipping over"
+                      type="number"
+                      autoComplete="off"
+                      value={String(freeOver)}
+                      onChange={(v) => setFreeOver(Number(v) || 0)}
+                      helpText="Once the order subtotal reaches this, shipping is charged as 0 whichever rate is picked. 0 turns it off. Also editable on the Fraud & delivery page."
+                    />
+
+                    <Divider />
+                    <SectionTitle title="Currency & urgency" />
+                    <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+                      <TextField
+                        label="Currency symbol"
+                        autoComplete="off"
+                        value={content.currencySymbol}
+                        onChange={setC("currencySymbol")}
+                        placeholder="Auto"
+                        helpText="Leave empty to use your store's own currency format."
+                      />
+                      <TextField
+                        label="Countdown timer (minutes)"
+                        type="number"
+                        autoComplete="off"
+                        value={String(content.countdownMinutes)}
+                        onChange={setC("countdownMinutes")}
+                        helpText="0 turns the timer off."
+                      />
+                    </InlineGrid>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      The COD fee charged on every order is set on the Fraud &amp; delivery page.
+                    </Text>
+                  </BlockStack>
+                )}
+
+                {tab === 5 && (
+                  <BlockStack gap="400">
                     <Checkbox label="Enable the COD form on the storefront" checked={content.enabled} onChange={setC("enabled")} />
                     <TextField label="Heading" autoComplete="off" value={content.headingText} onChange={setC("headingText")} />
-                    <TextField
-                      label="Checkout notice"
-                      autoComplete="off"
-                      multiline={2}
-                      value={content.checkoutNotice}
-                      onChange={setC("checkoutNotice")}
-                      helpText="Shown under the summary, before the customer continues to Shopify checkout."
-                    />
-                    <TextField
-                      label="Order type"
-                      autoComplete="off"
-                      value={content.orderTag}
-                      onChange={setC("orderTag")}
-                      helpText={'Saved on the cart as the attribute "Order type", which Shopify carries onto the order. Use it in a Shopify Flow rule to tag these orders.'}
-                    />
+                    <TextField label="Success message" autoComplete="off" multiline={2} value={content.successMessage} onChange={setC("successMessage")} />
+                    <TextField label="Order tag" autoComplete="off" value={content.orderTag} onChange={setC("orderTag")} helpText="Added to every COD order." />
 
                     <Divider />
                     <SectionTitle title="Summary & trust" />
@@ -524,7 +971,24 @@ export default function FormBuilder() {
         <div style={{ position: "sticky", top: 16, alignSelf: "start" }}>
           <BlockStack gap="200">
             <Text as="h2" variant="headingSm" alignment="center" tone="subdued">Live preview</Text>
-            <LivePreview content={content} b={b} moneyFormat={moneyFormat} />
+            {rulesOn && (
+              <TextField
+                label="Preview a city"
+                autoComplete="off"
+                value={previewCity}
+                onChange={setPreviewCity}
+                placeholder="e.g. Dhaka"
+                helpText="Only affects this preview — shows which rule a customer's city would hit."
+              />
+            )}
+            <LivePreview
+              content={content}
+              b={b}
+              ship={previewOptions}
+              codFee={settings.codFee}
+              freeOver={Number(freeOver) || 0}
+              moneyFormat={moneyFormat}
+            />
           </BlockStack>
         </div>
       </InlineGrid>
@@ -535,20 +999,28 @@ export default function FormBuilder() {
 function LivePreview({
   content,
   b,
+  ship,
+  codFee,
+  freeOver,
   moneyFormat,
 }: {
   content: any;
   b: Builder;
+  ship: ShipOption[];
+  codFee: number;
+  freeOver: number;
   moneyFormat: string;
 }) {
   const font = FONT_STACKS[b.fontFamily] === "inherit" ? "system-ui, sans-serif" : FONT_STACKS[b.fontFamily];
   const stacked = b.fieldLayout === "stacked";
 
-  // Same arithmetic the storefront does, against a sample product price. Only a
-  // subtotal: shipping, taxes and any fee are quoted by Shopify at checkout, so
-  // neither the form nor this preview can honestly show a total.
+  // Same arithmetic the storefront does, against a sample product price.
   const m = (n: number) => formatMoney(n, moneyFormat, content.currencySymbol);
+  const rows = ship.filter((o) => o.name.trim() !== "");
   const sample = 22;
+  const free = qualifiesForFreeShipping(sample, freeOver);
+  const shipCost = free ? 0 : rows.length > 0 ? Number(rows[0].price) || 0 : 0;
+  const total = sample + shipCost + (Number(codFee) || 0);
 
   const field = (label: string, req?: boolean) => (
     <div
@@ -633,8 +1105,39 @@ function LivePreview({
           )}
         </div>
 
+        {content.showName && field("Name", true)}
+        {content.showPhone && field("Phone", true)}
+        {content.showEmail && field("Email")}
+        {content.showAddress && field("Address", true)}
+        {content.showCity && field("City")}
         {content.showQuantity && field("Quantity")}
         {content.showNotes && field("Note")}
+
+        {rows.length > 0 && (
+          <>
+            <div style={{ fontWeight: 700, fontSize: "0.85em", margin: "10px 0 6px" }}>Shipping options</div>
+            {rows.map((o, i) => (
+              <div
+                key={`${o.name}-${i}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  border: `1px solid ${b.inputBorderColor}`,
+                  borderRadius: b.inputRadius,
+                  padding: "7px 9px",
+                  marginBottom: 5,
+                  fontSize: "0.85em",
+                }}
+              >
+                <span>
+                  <input type="radio" readOnly checked={i === 0} style={{ accentColor: b.accentColor }} /> {o.name}
+                </span>
+                <b>{free ? "FREE" : m(Number(o.price) || 0)}</b>
+              </div>
+            ))}
+          </>
+        )}
 
         <div style={{ borderTop: "1px solid #eee", marginTop: 8, paddingTop: 8, fontSize: "0.85em" }}>
           {b.showProductImage && (
@@ -643,10 +1146,12 @@ function LivePreview({
               <span>Sample product</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}><span>Subtotal</span><b>{m(sample)}</b></div>
-        </div>
-        <div style={{ fontSize: "0.8em", opacity: 0.75, textAlign: "center", marginTop: 8 }}>
-          {content.checkoutNotice || "Shipping, taxes and payment are calculated at checkout."}
+          <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><b>{m(sample)}</b></div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><span>Shipping</span><b>{free ? "FREE" : m(shipCost)}</b></div>
+          {Number(codFee) > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span>COD fee</span><b>{m(Number(codFee))}</b></div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, borderTop: "1px solid #eee", marginTop: 4, paddingTop: 4 }}><span>Total</span><b>{m(total)}</b></div>
         </div>
 
         <button
@@ -665,7 +1170,7 @@ function LivePreview({
           }}
         >
           {b.submitText || "Order Now"}
-          {b.submitShowTotal ? ` — ${m(sample)}` : ""}
+          {b.submitShowTotal ? ` — ${m(total)}` : ""}
         </button>
 
         {b.trustBadge ? (

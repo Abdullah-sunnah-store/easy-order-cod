@@ -5,15 +5,17 @@ import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { getActivePlan } from "../models/billing.server";
 import { can } from "../lib/plans";
+import { getLiveRates } from "../models/shippingSync.server";
 import { resolveUpsells } from "../models/upsellResolve.server";
+import type { ShipMode, ShipOption, ShipRule } from "../lib/shipping";
+import {
+  DEFAULT_FALLBACK_LABEL,
+  parseJsonArray,
+  resolveShippingOptions,
+} from "../lib/shipping";
 
 // Returns the storefront-relevant COD form settings as JSON.
 // Called by the theme extension via /apps/cod/settings (signed by Shopify).
-//
-// Nothing here may describe shipping rates, delivery charges or COD fees. The
-// form no longer prices an order — Shopify checkout does — and sending rates
-// down would only tempt the form back into the behaviour that App Store
-// requirement 1.1.2 prohibits.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.public.appProxy(request);
   if (!session || !admin) {
@@ -29,6 +31,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {
     /* ignore malformed */
   }
+  const mode = ((s.shippingMode as ShipMode) || "manual") as ShipMode;
+  const manual = parseJsonArray<ShipOption>(s.shippingOptions);
+  let synced = parseJsonArray<ShipOption>(s.shippingSynced);
+  // Auto-refresh keeps the form in step with the shop's shipping zones; it falls
+  // back to the last stored sync if the Admin API call fails.
+  if (s.shippingAutoSync && (mode === "auto" || mode === "both")) {
+    synced = await getLiveRates(admin, session.shop, synced);
+  }
+  const shipping = {
+    mode,
+    manual,
+    synced,
+    hiddenRates: parseJsonArray<string>(s.shippingHiddenRates),
+    rulesEnabled: s.shippingRulesEnabled,
+    rules: parseJsonArray<ShipRule>(s.shippingRules),
+    fallbackPrice: s.shippingFallbackPrice,
+    fallbackLabel: s.shippingFallbackLabel || DEFAULT_FALLBACK_LABEL,
+    freeShippingThreshold: s.freeShippingThreshold,
+  };
+  // The city-independent list, for older cached copies of cod-form.js that
+  // don't know how to re-price by city.
+  const shippingOptions = resolveShippingOptions(shipping);
 
   // Offers from the Upsells page, resolved to real variants and prices. A
   // failure here must not take the order form down with it.
@@ -38,22 +62,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {
     /* form still works without offers */
   }
-
+  // "+880, +91" -> ["+880","+91"]; the first is preselected on the form.
+  const dialCodes = String((s as any).dialCodes || "")
+    .split(",")
+    .map((d) => d.trim())
+    .filter(Boolean);
   return json({
     enabled: s.enabled,
+    dialCodes,
     headingText: s.headingText,
     buttonText: s.buttonText,
-    // Stamped on the cart as the "Order type" attribute so the merchant (and
-    // our orders/create webhook) can recognise a COD order.
-    orderTag: s.orderTag,
+    successMessage: s.successMessage,
     builder,
+    // Storefront values that used to live in the theme block's schema.
     currencySymbol: s.currencySymbol,
     countdownMinutes: s.countdownMinutes,
-    checkoutNotice: s.checkoutNotice,
+    codFee: s.codFee,
+    shippingOptions,
+    shipping,
     upsells,
-    // Quantity and note are all that is left. Name, email, phone, address and
-    // city moved to Shopify checkout, which is where they belong.
     fields: {
+      name: s.showName,
+      email: s.showEmail,
+      phone: s.showPhone,
+      address: s.showAddress,
+      city: s.showCity,
       quantity: s.showQuantity,
       notes: s.showNotes,
     },

@@ -14,43 +14,34 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { getCodSettings } from "../models/codSettings.server";
-import { listCodOrderIds } from "../models/usage.server";
 
-// The app used to tag the orders it created, so this page could just search
-// `tag:COD`. It no longer creates them — Shopify checkout does (App Store
-// requirement 1.1.2) — so the COD orders are the ones our orders/create webhook
-// recognised by their cart attribute. We keep only their ids and read the live
-// details back from Shopify here, so no customer data is stored by the app.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const settings = await getCodSettings(session.shop);
   const tag = settings.orderTag || "COD";
 
-  const ids = await listCodOrderIds(session.shop);
-  if (ids.length === 0) {
-    return { orders: [], tag, ordersBlocked: false, error: null };
-  }
-
   try {
     const response = await admin.graphql(
       `#graphql
-      query CodOrders($ids: [ID!]!) {
-        nodes(ids: $ids) {
-          ... on Order {
-            id
-            name
-            createdAt
-            displayFinancialStatus
-            displayFulfillmentStatus
-            totalPriceSet { shopMoney { amount currencyCode } }
-            email
-            phone
-            shippingAddress { name phone address1 city }
-            lineItems(first: 5) { edges { node { title quantity } } }
+      query CodOrders($query: String!) {
+        orders(first: 50, sortKey: CREATED_AT, reverse: true, query: $query) {
+          edges {
+            node {
+              id
+              name
+              createdAt
+              displayFinancialStatus
+              displayFulfillmentStatus
+              totalPriceSet { shopMoney { amount currencyCode } }
+              email
+              phone
+              shippingAddress { name phone address1 city }
+              lineItems(first: 5) { edges { node { title quantity } } }
+            }
           }
         }
       }`,
-      { variables: { ids } },
+      { variables: { query: `tag:${tag}` } },
     );
     const json = await response.json();
     const gqlErrors = (json as any).errors;
@@ -69,9 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         error: denied ? null : message,
       };
     }
-    // nodes() returns null for an order the merchant has since deleted; drop
-    // those rather than rendering blank rows.
-    const orders = (json.data?.nodes ?? []).filter((n: any) => n?.id);
+    const orders = (json.data?.orders?.edges ?? []).map((e: any) => e.node);
     return { orders, tag, ordersBlocked: false, error: null };
   } catch (e: any) {
     const message = e?.message || "Could not load orders.";
@@ -120,10 +109,8 @@ export default function OrdersPage() {
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
                 <p>
-                  Orders that start from the storefront COD form appear here once
-                  the customer completes Shopify checkout. They carry the cart
-                  attribute <b>Order type: {tag}</b>, which you can also use in a
-                  Shopify Flow rule to tag them.
+                  Orders placed through the storefront COD form (tagged{" "}
+                  <b>{tag}</b>) will appear here.
                 </p>
               </EmptyState>
             ) : (

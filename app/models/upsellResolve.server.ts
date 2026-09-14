@@ -5,12 +5,8 @@ import { listUpsells } from "./upsells.server";
 //
 // What the merchant picked is a product or a collection GID. The form needs
 // concrete variants with current prices, so every offer is resolved against the
-// Admin API here.
-//
-// The prices below are for DISPLAY ONLY. Since App Store requirement 1.1.2 the
-// app no longer creates the order, so it never charges these amounts — the
-// items go into a Shopify cart and `discountCode` names the Shopify discount
-// that applies the offer's percentage at checkout.
+// Admin API here. The same resolution runs again when the order is created, so
+// the price charged is never the one the browser sent.
 
 export type OfferItem = {
   variantId: string;
@@ -30,12 +26,6 @@ export type ResolvedOffer = {
   minQuantity: number;
   /** Source label, e.g. the collection's name. */
   sourceTitle: string;
-  /**
-   * The Shopify discount code that applies this offer's percentage at checkout.
-   * Empty when the offer has no discount, or when the discount could not be
-   * created — the items are then simply added at their normal price.
-   */
-  discountCode: string;
   items: OfferItem[];
 };
 
@@ -89,7 +79,6 @@ async function resolveOne(
     kind: offer.offerKind || "product",
     discountPercent: Math.min(100, Math.max(0, offer.discountPercent || 0)),
     minQuantity: Math.max(1, offer.minQuantity || 1),
-    discountCode: offer.discountCode || "",
   };
 
   if (base.kind === "collection") {
@@ -160,8 +149,8 @@ async function resolveOne(
 }
 
 // Every product-page view hits /apps/cod/settings, so the storefront reads
-// through a short cache. A stale price here is only a stale label: the amount
-// charged is whatever Shopify's cart and checkout compute.
+// through a short cache. Order creation passes fresh:true — a stale price would
+// end up on a real order.
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { at: number; offers: ResolvedOffer[] }>();
 
@@ -190,4 +179,23 @@ export async function resolveUpsells(
   }
   if (!opts.fresh) cache.set(shop, { at: Date.now(), offers: resolved });
   return resolved;
+}
+
+/** Unit price after the offer's discount, rounded to cents. */
+export function discountedPrice(price: number, discountPercent: number): number {
+  const pct = Math.min(100, Math.max(0, discountPercent || 0));
+  return Math.round(price * (1 - pct / 100) * 100) / 100;
+}
+
+/**
+ * The best quantity-offer discount for a given main-item quantity. Quantity
+ * offers discount the product being bought rather than adding an item.
+ */
+export function quantityDiscountFor(
+  offers: ResolvedOffer[],
+  quantity: number,
+): number {
+  return offers
+    .filter((o) => o.type === "quantity" && quantity >= o.minQuantity)
+    .reduce((best, o) => Math.max(best, o.discountPercent), 0);
 }
