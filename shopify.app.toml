@@ -18,8 +18,12 @@ handle = "easy-order-cod"
 # it runs. Release from shopify.app.production.toml instead — see that file.
 automatically_update_urls_on_dev = true
 
-# The storefront form calls /apps/cod/settings and /apps/cod/order through this
-# proxy. Without it those paths 404 and no COD order can ever be created.
+# The storefront form reads /apps/cod/settings through this proxy. Without it
+# that path 404s and the form falls back to its built-in defaults.
+#
+# There is deliberately no order endpoint here any more: the form builds a
+# Shopify cart and hands off to Shopify checkout, which is what creates the
+# order (App Store requirement 1.1.2).
 [app_proxy]
 url = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/proxy"
 subpath = "cod"
@@ -36,6 +40,14 @@ api_version = "2026-07"
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+
+  # Shopify creates COD orders at its own checkout now, so this webhook is the
+  # only way the app learns that one happened. It backs the Orders page and the
+  # plan's monthly allowance; the handler ignores every order whose cart is not
+  # marked with the COD "Order type" attribute.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
 
   # Mandatory GDPR / privacy compliance webhooks (required for App Store apps).
   #
@@ -61,9 +73,12 @@ api_version = "2026-07"
   uri = "https://drivers-prescription-vaccine-collaborative.trycloudflare.com/webhooks/shop/redact"
 
 [access_scopes]
-# Only what the COD app actually uses: create orders, read orders/products, and
-# read the shop's shipping zones for the Form builder's auto-synced rates.
-scopes = "read_orders,write_orders,read_products,read_shipping"
+# Only what the COD app actually uses. write_orders and read_shipping are gone:
+# the app no longer creates orders or quotes shipping — Shopify checkout does
+# both (App Store requirement 1.1.2). read_orders backs the Orders page and the
+# orders/create webhook; write_discounts backs the upsell offers, whose
+# percentages are now real Shopify discounts applied at checkout.
+scopes = "read_orders,read_products,read_discounts,write_discounts"
 
 [auth]
 redirect_urls = [
