@@ -42,85 +42,53 @@ model Session {
 
 // Per-shop configuration for the Cash-on-Delivery order form.
 model CodSettings {
-  shop           String   @id
-  enabled        Boolean  @default(true)
-  headingText    String   @default("Order — Cash on Delivery")
-  buttonText     String   @default("Order Now (Cash on Delivery)")
-  successMessage String   @default("Thank you! Your order has been placed. We'll call you to confirm.")
-  orderTag       String   @default("COD")
-  // Which fields to show on the storefront form.
-  showName       Boolean  @default(true)
-  showEmail      Boolean  @default(false)
-  showPhone      Boolean  @default(true)
-  showAddress    Boolean  @default(true)
-  showCity       Boolean  @default(true)
-  showQuantity   Boolean  @default(true)
-  showNotes      Boolean  @default(false)
-  // Country dial codes offered beside the phone field. Comma-separated; the
-  // first entry is preselected. Customers can then type a local number
-  // (01709504746) and still produce a valid international phone.
-  dialCodes      String   @default("+880,+91,+92,+977,+94,+971,+966,+60,+65,+44,+1")
+  shop               String   @id
+  enabled            Boolean  @default(true)
+  headingText        String   @default("Order — Cash on Delivery")
+  buttonText         String   @default("Order Now (Cash on Delivery)")
+  // Cart attribute value stamped on COD carts so the merchant can recognise
+  // these orders (and tag them with Shopify Flow). The app does not tag orders
+  // itself — since requirement 1.1.2 it never writes an order at all.
+  orderTag           String   @default("COD")
+  // Which of the two remaining form fields to show. The contact and address
+  // fields are gone: requirement 1.1.2 puts those in Shopify checkout.
+  showQuantity       Boolean  @default(true)
+  showNotes          Boolean  @default(false)
   // Fraud prevention
-  otpEnabled         Boolean @default(false)
-  phoneConfirmation  Boolean @default(false)
-  ipBlockingEnabled  Boolean @default(false)
-  blockedIps         String  @default("")
-  blockedPostalCodes String  @default("")
-  maxOrdersPerPhone  Int     @default(0)
-  // Delivery / COD fees
-  codFee                Float @default(0)
-  shippingRate          Float @default(0)
-  freeShippingThreshold Float @default(0)
+  otpEnabled         Boolean  @default(false)
+  phoneConfirmation  Boolean  @default(false)
+  ipBlockingEnabled  Boolean  @default(false)
+  blockedIps         String   @default("")
+  blockedPostalCodes String   @default("")
+  maxOrdersPerPhone  Int      @default(0)
   // Storefront presentation previously held in the theme block's schema.
   // currencySymbol "" = derive from the shop's own money format.
-  currencySymbol   String @default("")
-  countdownMinutes Int    @default(0)
-  // JSON array of { name, price } shipping choices shown on the form. These are
-  // the merchant's own hand-written rates.
-  shippingOptions  String @default("[]")
-  // Where the rates on the form come from: "manual" (shippingOptions only),
-  // "auto" (rates synced from the shop's Shopify shipping zones) or "both".
-  shippingMode     String   @default("manual")
-  // Last successful sync of the shop's Shopify delivery profiles, as a JSON
-  // array of { name, price }. Kept so the storefront still has rates when a
-  // live refresh fails or is switched off.
-  shippingSynced   String    @default("[]")
-  shippingSyncedAt DateTime?
-  // Re-pull the Shopify rates on every storefront request (cached briefly)
-  // instead of only when the merchant presses "Sync now".
-  shippingAutoSync Boolean   @default(false)
-  // Synced rates the merchant switched off, as a JSON array of rate names.
-  // Stored by name, not position, so a re-sync doesn't hide the wrong rate; a
-  // newly appearing rate defaults to shown.
-  shippingHiddenRates String @default("[]")
-  // Dynamic rate: the price follows the city the customer types. JSON array of
-  // { cities: "Dhaka, Gazipur", price, label }; the first matching rule wins and
-  // shippingFallback* applies when nothing matches.
-  shippingRulesEnabled  Boolean @default(false)
-  shippingRules         String  @default("[]")
-  shippingFallbackPrice Float   @default(0)
-  shippingFallbackLabel String  @default("Delivery charge")
+  currencySymbol     String   @default("")
+  countdownMinutes   Int      @default(0)
+  // Line under the summary telling the customer that shipping, taxes and
+  // payment are settled on Shopify's checkout page.
+  checkoutNotice     String   @default("Shipping, taxes and payment are calculated at checkout.")
   // Form-builder appearance (JSON: form type, button styling, colors, radius…)
-  builderConfig  String   @default("{}")
-  updatedAt      DateTime @updatedAt
+  builderConfig      String   @default("{}")
+  updatedAt          DateTime @updatedAt
 }
 
 // Marketing pixels and third-party integrations ("Connections").
 model Connections {
-  shop               String   @id
-  fbPixelId          String   @default("")
-  tiktokPixelId      String   @default("")
-  googleTagId        String   @default("")
-  snapPixelId        String   @default("")
-  pinterestTagId     String   @default("")
-  googleSheetsEnabled Boolean @default(false)
-  googleSheetUrl     String   @default("")
-  smsProvider        String   @default("none")
-  smsApiKey          String   @default("")
-  smsSenderId        String   @default("")
-  whatsappEnabled    Boolean  @default(false)
-  whatsappPhone      String   @default("")
-  updatedAt          DateTime @updatedAt
+  shop                String   @id
+  fbPixelId           String   @default("")
+  tiktokPixelId       String   @default("")
+  googleTagId         String   @default("")
+  snapPixelId         String   @default("")
+  pinterestTagId      String   @default("")
+  googleSheetsEnabled Boolean  @default(false)
+  googleSheetUrl      String   @default("")
+  smsProvider         String   @default("none")
+  smsApiKey           String   @default("")
+  smsSenderId         String   @default("")
+  whatsappEnabled     Boolean  @default(false)
+  whatsappPhone       String   @default("")
+  updatedAt           DateTime @updatedAt
 }
 
 // Monthly COD order count per shop, used to enforce the plan's order limit.
@@ -156,7 +124,27 @@ model Upsell {
   discountPercent   Int      @default(0)
   minQuantity       Int      @default(1)
   enabled           Boolean  @default(true)
+  // The Shopify discount that actually applies this offer's percentage. The app
+  // can no longer price an order line itself (requirement 1.1.2), so the
+  // discount lives in the merchant's admin and is named on the checkout URL.
+  discountId        String   @default("")
+  discountCode      String   @default("")
   createdAt         DateTime @default(now())
 
   @@index([shop])
+}
+
+// COD orders seen on the orders/create webhook, identified by the cart
+// attribute the storefront form sets. Shopify creates these orders at its own
+// checkout; this table only records that one happened, for the Orders page and
+// the plan's monthly allowance. Deliberately holds no customer data.
+model CodOrder {
+  shop      String
+  orderId   String
+  name      String   @default("")
+  period    String
+  createdAt DateTime @default(now())
+
+  @@id([shop, orderId])
+  @@index([shop, period])
 }

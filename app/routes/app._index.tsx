@@ -20,37 +20,36 @@ import { authenticate } from "../shopify.server";
 import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { listUpsells } from "../models/upsells.server";
+import { listCodOrderIds } from "../models/usage.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const settings = await getCodSettings(session.shop);
   const connections = await getConnections(session.shop);
   const upsells = await listUpsells(session.shop);
-  const tag = settings.orderTag || "COD";
-
   let revenue = 0;
   let currency = "USD";
   let pending = 0;
   let count = 0;
   let ordersBlocked = false;
+  const ids = await listCodOrderIds(session.shop, 100);
   try {
+    if (ids.length === 0) throw new Error("no COD orders recorded yet");
     const response = await admin.graphql(
       `#graphql
-      query CodStats($query: String!) {
-        orders(first: 100, query: $query) {
-          edges {
-            node {
-              displayFinancialStatus
-              totalPriceSet { shopMoney { amount currencyCode } }
-            }
+      query CodStats($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Order {
+            displayFinancialStatus
+            totalPriceSet { shopMoney { amount currencyCode } }
           }
         }
       }`,
-      { variables: { query: `tag:${tag}` } },
+      { variables: { ids } },
     );
     const json = await response.json();
     if ((json as any).errors) throw new Error("orders query failed");
-    const orders = (json.data?.orders?.edges ?? []).map((e: any) => e.node);
+    const orders = (json.data?.nodes ?? []).filter(Boolean);
     count = orders.length;
     for (const o of orders) {
       const m = o.totalPriceSet?.shopMoney;
@@ -61,8 +60,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (o.displayFinancialStatus === "PENDING") pending += 1;
     }
   } catch {
-    // App not yet approved for protected customer data → show a notice.
-    ordersBlocked = true;
+    // App not yet approved for protected customer data → show a notice. An
+    // empty list is not a denial, so don't cry wolf before the first order.
+    ordersBlocked = ids.length > 0;
   }
 
   const hasPixels = Boolean(
@@ -172,12 +172,22 @@ export default function Dashboard() {
           <Layout.Section variant="oneThird">
             <Card>
               <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">Add the form to your store</Text>
+                <Text as="h2" variant="headingMd">Set up Cash on Delivery</Text>
                 <List type="number">
+                  <List.Item>
+                    In Shopify, go to <b>Settings → Payments → Manual payment
+                    methods</b> and turn on <b>Cash on Delivery (COD)</b>. The form
+                    sends customers to Shopify checkout, so COD has to be offered
+                    there.
+                  </List.Item>
                   <List.Item>Open your theme editor.</List.Item>
                   <List.Item>On a product template, choose <b>Add block → Apps → COD Order Form</b>.</List.Item>
-                  <List.Item>Save. Customers can now order with Cash on Delivery.</List.Item>
+                  <List.Item>Save. Customers can now order and pay cash on delivery.</List.Item>
                 </List>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Shipping rates, taxes and any COD surcharge are set in Shopify and
+                  quoted on its checkout page.
+                </Text>
               </BlockStack>
             </Card>
           </Layout.Section>

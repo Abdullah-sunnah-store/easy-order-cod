@@ -6,7 +6,7 @@ import {
   Layout,
   Card,
   BlockStack,
-  InlineGrid,
+  List,
   TextField,
   Checkbox,
   Text,
@@ -32,7 +32,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const form = await request.formData();
-  const num = (k: string) => parseFloat(String(form.get(k) || "0")) || 0;
   const int = (k: string) => parseInt(String(form.get(k) || "0"), 10) || 0;
 
   // Locked fields keep their stored value regardless of what was posted.
@@ -52,9 +51,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? String(form.get("blockedPostalCodes") || "")
       : existing.blockedPostalCodes,
     maxOrdersPerPhone: int("maxOrdersPerPhone"),
-    codFee: num("codFee"),
-    shippingRate: num("shippingRate"),
-    freeShippingThreshold: num("freeShippingThreshold"),
   });
   return { ok: true };
 };
@@ -85,9 +81,6 @@ export default function ProtectionPage() {
       "blockedIps",
       "blockedPostalCodes",
       "maxOrdersPerPhone",
-      "codFee",
-      "shippingRate",
-      "freeShippingThreshold",
     ].forEach((k) => fd.append(k, String((state as any)[k])));
     fetcher.submit(fd, { method: "POST" });
   };
@@ -154,11 +147,24 @@ export default function ProtectionPage() {
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Delivery &amp; COD fees</Text>
-                <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
-                  <TextField label="COD fee" type="number" autoComplete="off" prefix="$" value={String(state.codFee)} onChange={set("codFee")} />
-                  <TextField label="Shipping rate" type="number" autoComplete="off" prefix="$" value={String(state.shippingRate)} onChange={set("shippingRate")} helpText="Rates shown on the form are set in Form settings → Shipping." />
-                  <TextField label="Free shipping over" type="number" autoComplete="off" prefix="$" value={String(state.freeShippingThreshold)} onChange={set("freeShippingThreshold")} helpText="0 = never. Same setting as Form settings → Shipping." />
-                </InlineGrid>
+                <Text as="p" tone="subdued">
+                  Shipping rates, free-shipping thresholds and any cash-on-delivery
+                  surcharge are set in Shopify, not here. Shopify quotes them on its
+                  own checkout page, which is the only place an order can be priced.
+                </Text>
+                <List>
+                  <List.Item>
+                    Shipping rates: <b>Settings → Shipping and delivery</b>.
+                  </List.Item>
+                  <List.Item>
+                    Free shipping: <b>Discounts → Create discount → Free shipping</b>,
+                    with a minimum purchase amount.
+                  </List.Item>
+                  <List.Item>
+                    A COD surcharge: add it as a shipping rate on the Cash on Delivery
+                    method, or use a payment customization function.
+                  </List.Item>
+                </List>
                 <div>
                   <Button variant="primary" loading={saving} onClick={save}>Save</Button>
                 </div>
