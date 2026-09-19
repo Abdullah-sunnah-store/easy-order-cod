@@ -15,7 +15,7 @@ name = "Easy order COD"
 # MUST be the bare origin, with no /app path — see the note in shopify.app.toml.
 # A trailing /app registers the compliance webhooks at /app/webhooks/..., which
 # matches no route and fails the HMAC signature check.
-application_url = "https://easy-order-cod.onrender.com"
+application_url = "https://easy-order-cod.vercel.app"
 embedded = true
 handle = "easy-order-cod"
 
@@ -25,7 +25,7 @@ automatically_update_urls_on_dev = false
 # The storefront form calls /apps/cod/settings and /apps/cod/order through this
 # proxy. Without it those paths 404 and no COD order can ever be created.
 [app_proxy]
-url = "https://easy-order-cod.onrender.com/proxy"
+url = "https://easy-order-cod.vercel.app/proxy"
 subpath = "cod"
 prefix = "apps"
 
@@ -41,18 +41,25 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
+  # Mandatory GDPR / privacy compliance webhooks (required for App Store apps).
+  #
+  # ABSOLUTE on purpose. A relative uri is resolved against application_url at
+  # deploy time, so an application_url carrying an /app path registers these at
+  # /app/webhooks/... — which is the URL Shopify's compliance check probed and
+  # got a non-401 from. An absolute https URL cannot be re-prefixed, so what
+  # Shopify calls is exactly what is written here. Update the host below
+  # whenever the deployment moves.
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
-  uri = "/webhooks/customers/data_request"
+  uri = "https://easy-order-cod.vercel.app/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/redact" ]
-  uri = "/webhooks/customers/redact"
+  uri = "https://easy-order-cod.vercel.app/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "shop/redact" ]
-  uri = "/webhooks/shop/redact"
+  uri = "https://easy-order-cod.vercel.app/webhooks/shop/redact"
 
 [access_scopes]
 # Only what the COD app actually uses: create orders, read orders/products, and
@@ -61,9 +68,9 @@ scopes = "read_orders,write_orders,read_products,read_shipping"
 
 [auth]
 redirect_urls = [
-  "https://easy-order-cod.onrender.com/auth/callback",
-  "https://easy-order-cod.onrender.com/auth/shopify/callback",
-  "https://easy-order-cod.onrender.com/api/auth/callback"
+  "https://easy-order-cod.vercel.app/auth/callback",
+  "https://easy-order-cod.vercel.app/auth/shopify/callback",
+  "https://easy-order-cod.vercel.app/api/auth/callback"
 ]
 
 [pos]
