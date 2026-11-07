@@ -114,6 +114,15 @@ correctly there. That is one more reason never to deploy the dev config.
 rejects any that lands outside `/webhooks/*`, and POSTs an invalidly-signed
 delivery to the compliance endpoint to confirm it answers 401.
 
+**A released version keeps its old URLs until the next `shopify app deploy`,**
+so `app/routes/app_.webhooks.*.tsx` alias the same handlers at
+`/app/webhooks/*`. That makes the already-registered endpoints answer correctly
+from a plain Vercel deploy, with no Shopify release — which is how the review
+check was cleared. The trailing `_` in `app_.` opts the routes out of nesting
+under `app.tsx`, so they stay resource routes and never hit
+`authenticate.admin`. Keep them: they also catch any shop still delivering to
+the old path.
+
 ## The invariants
 
 1. **One deployable branch: `master`.** It is the Vercel project's Production

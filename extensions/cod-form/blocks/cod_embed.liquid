@@ -1,8 +1,11 @@
 {% comment %}
   Easy order COD app embed. Appears under Theme editor → App embeds.
-  When enabled, loads the merchant's marketing pixels site-wide.
+  When enabled (and "Load marketing pixels" is on), loads the merchant's
+  pixels from Connections site-wide and reports COD-button checkouts to them.
 {% endcomment %}
-<script src="{{ 'cod-embed.js' | asset_url }}" defer></script>
+{% if block.settings.load_pixels %}
+  <script src="{{ 'cod-embed.js' | asset_url }}" defer></script>
+{% endif %}
 
 {% schema %}
 {

@@ -1,5 +1,18 @@
 (function () {
-  // Load the merchant's configured marketing pixels site-wide.
+  // Easy order COD app embed: loads the merchant's marketing pixels site-wide
+  // (PageView) and reports the COD button as a checkout start.
+  //
+  // The COD block (cod-form.js) dispatches "cod:checkout" with the items
+  // subtotal just before it sends the customer to Shopify checkout. Purchase
+  // itself happens inside Shopify checkout, which this script cannot see —
+  // the merchant's Facebook / Google / TikTok channel apps report that.
+  var ready = [];
+
+  function currency() {
+    var s = window.Shopify;
+    return (s && s.currency && s.currency.active) || undefined;
+  }
+
   fetch("/apps/cod/settings", { headers: { Accept: "application/json" } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (cfg) {
@@ -18,6 +31,9 @@
         })(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
         window.fbq("init", p.facebook);
         window.fbq("track", "PageView");
+        ready.push(function (value, cur) {
+          window.fbq("track", "InitiateCheckout", { value: value, currency: cur });
+        });
       }
 
       // TikTok Pixel
@@ -37,19 +53,68 @@
           ttq.load(p.tiktok);
           ttq.page();
         })(window, document, "ttq");
+        ready.push(function (value, cur) {
+          window.ttq.track("InitiateCheckout", { value: value, currency: cur });
+        });
       }
 
       // Google tag (gtag.js)
       if (p.google) {
         var g = document.createElement("script");
         g.async = true;
-        g.src = "https://www.googletagmanager.com/gtag/js?id=" + p.google;
+        g.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(p.google);
         document.head.appendChild(g);
         window.dataLayer = window.dataLayer || [];
-        function gtag() { window.dataLayer.push(arguments); }
+        var gtag = function () { window.dataLayer.push(arguments); };
+        window.gtag = window.gtag || gtag;
         gtag("js", new Date());
         gtag("config", p.google);
+        ready.push(function (value, cur) {
+          gtag("event", "begin_checkout", { value: value, currency: cur });
+        });
+      }
+
+      // Snapchat Pixel
+      if (p.snapchat) {
+        (function (e, t, n) {
+          if (e.snaptr) return;
+          var a = (e.snaptr = function () {
+            a.handleRequest ? a.handleRequest.apply(a, arguments) : a.queue.push(arguments);
+          });
+          a.queue = [];
+          var r = t.createElement("script"); r.async = !0; r.src = n;
+          var u = t.getElementsByTagName("script")[0]; u.parentNode.insertBefore(r, u);
+        })(window, document, "https://sc-static.net/scevent.min.js");
+        window.snaptr("init", p.snapchat, {});
+        window.snaptr("track", "PAGE_VIEW");
+        ready.push(function (value, cur) {
+          window.snaptr("track", "START_CHECKOUT", { price: value, currency: cur });
+        });
+      }
+
+      // Pinterest Tag
+      if (p.pinterest) {
+        (function (e) {
+          if (window.pintrk) return;
+          window.pintrk = function () { window.pintrk.queue.push(Array.prototype.slice.call(arguments)); };
+          var n = window.pintrk; n.queue = []; n.version = "3.0";
+          var t = document.createElement("script"); t.async = !0; t.src = e;
+          var r = document.getElementsByTagName("script")[0]; r.parentNode.insertBefore(t, r);
+        })("https://s.pinimg.com/ct/core.js");
+        window.pintrk("load", p.pinterest);
+        window.pintrk("page");
+        ready.push(function (value, cur) {
+          window.pintrk("track", "addtocart", { value: value, currency: cur });
+        });
       }
     })
     .catch(function () { /* pixels are optional */ });
+
+  document.addEventListener("cod:checkout", function (e) {
+    var value = Number(e && e.detail) || 0;
+    var cur = currency();
+    ready.forEach(function (send) {
+      try { send(value, cur); } catch (err) { /* one pixel must not stop the rest */ }
+    });
+  });
 })();

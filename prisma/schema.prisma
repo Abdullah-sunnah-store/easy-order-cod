@@ -146,9 +146,26 @@ model UsageCounter {
   shop      String
   period    String
   count     Int      @default(0)
+  // Sum of those orders' totals, in the shop's currency (Analytics page).
+  revenue   Float    @default(0)
+  // How many of them were tagged for review (blocked postal code / phone limit).
+  flagged   Int      @default(0)
   updatedAt DateTime @updatedAt
 
   @@id([shop, period])
+}
+
+// Every COD order the orders/create webhook has already handled. Shopify can
+// deliver the same webhook more than once; inserting here first makes a repeat
+// delivery a no-op instead of a second count against the plan. Holds only the
+// order's GID — no customer data. Rows older than 60 days are pruned.
+model ProcessedOrder {
+  shop      String
+  orderId   String
+  createdAt DateTime @default(now())
+
+  @@id([shop, orderId])
+  @@index([createdAt])
 }
 
 // Upsell / order-bump offers configured by the merchant.

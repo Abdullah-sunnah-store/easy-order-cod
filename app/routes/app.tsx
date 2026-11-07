@@ -29,6 +29,7 @@ export default function App() {
         <Link to="/app/connections">Connections</Link>
         <Link to="/app/protection">Fraud &amp; delivery</Link>
         <Link to="/app/upsells">Upsells</Link>
+        <Link to="/app/analytics">Analytics</Link>
         <Link to="/app/plans">Plans</Link>
       </NavMenu>
       <Outlet />

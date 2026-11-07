@@ -20,12 +20,18 @@ import { authenticate } from "../shopify.server";
 import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { listUpsells } from "../models/upsells.server";
+import { getActivePlan } from "../models/billing.server";
+import { getMonthlyOrderCount } from "../models/usage.server";
+import { can, orderLimit, formatLimit } from "../lib/plans";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const settings = await getCodSettings(session.shop);
   const connections = await getConnections(session.shop);
   const upsells = await listUpsells(session.shop);
+  const plan = await getActivePlan(admin);
+  const limit = orderLimit(plan);
+  const used = await getMonthlyOrderCount(session.shop);
   const tag = settings.orderTag || "COD";
 
   let revenue = 0;
@@ -68,17 +74,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hasPixels = Boolean(
     connections.fbPixelId ||
       connections.tiktokPixelId ||
-      connections.googleTagId,
+      connections.googleTagId ||
+      connections.snapPixelId ||
+      connections.pinterestTagId,
   );
 
   return {
     stats: { count, revenue, currency, pending },
     ordersBlocked,
+    usage: { used, limit, overLimit: limit >= 0 && used >= limit },
     checklist: {
       formEnabled: settings.enabled,
       hasPixels,
       hasUpsells: upsells.length > 0,
-      fraudOn: settings.otpEnabled || settings.ipBlockingEnabled,
+      fraudOn:
+        settings.maxOrdersPerPhone > 0 ||
+        (can(plan, "postalBlocking") && settings.blockedPostalCodes.trim() !== ""),
     },
   };
 };
@@ -97,12 +108,25 @@ function ChecklistItem({ done, children }: { done: boolean; children: React.Reac
 }
 
 export default function Dashboard() {
-  const { stats, checklist, ordersBlocked } = useLoaderData<typeof loader>();
+  const { stats, checklist, ordersBlocked, usage } = useLoaderData<typeof loader>();
 
   return (
     <Page>
       <TitleBar title="Easy order COD" />
       <BlockStack gap="500">
+        {usage.overLimit && (
+          <Banner
+            tone="critical"
+            title="Your COD button is hidden on your store"
+            action={{ content: "Upgrade plan", url: "/app/plans" }}
+          >
+            <p>
+              You've used all {formatLimit(usage.limit)} COD orders included in your plan
+              this month, so customers no longer see the button. It comes back on the
+              1st (UTC), or right away if you upgrade.
+            </p>
+          </Banner>
+        )}
         {ordersBlocked && (
           <Banner tone="warning" title="Approve protected customer data access">
             <p>
@@ -151,10 +175,10 @@ export default function Dashboard() {
                     COD order form enabled
                   </ChecklistItem>
                   <ChecklistItem done={checklist.hasPixels}>
-                    Marketing pixel connected (Facebook / TikTok / Google)
+                    Marketing pixel connected (and the app embed turned on in your theme)
                   </ChecklistItem>
                   <ChecklistItem done={checklist.fraudOn}>
-                    Fraud protection turned on (OTP or IP blocking)
+                    Review rules set (repeat customers or postal codes)
                   </ChecklistItem>
                   <ChecklistItem done={checklist.hasUpsells}>
                     At least one upsell offer created
@@ -176,6 +200,7 @@ export default function Dashboard() {
                 <List type="number">
                   <List.Item>Open your theme editor.</List.Item>
                   <List.Item>On a product template, choose <b>Add block → Apps → COD Order Form</b>.</List.Item>
+                  <List.Item>For pixels: <b>App embeds → Easy order COD</b> → turn on.</List.Item>
                   <List.Item>Save. Customers can now order with Cash on Delivery.</List.Item>
                 </List>
               </BlockStack>

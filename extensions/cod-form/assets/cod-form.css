@@ -293,3 +293,6 @@
 .cod__msg--success { background: #e7f7ed; color: #0c6b3a; }
 .cod__msg--error { background: #fdecec; color: #b3261e; }
 .cod__msg--info { background: #eef2ff; color: #1e3a8a; }
+
+/* Buy-button subtitle (set by cod-form.js). */
+.cod__sub { font-size: .8em; font-weight: 400; opacity: .85; }

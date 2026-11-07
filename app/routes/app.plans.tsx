@@ -16,8 +16,8 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { PLANS, FREE_PLAN, PLAN_LIMITS, formatLimit } from "../lib/plans";
-import { BILLING_TEST, getActivePlan } from "../models/billing.server";
+import { PLANS, FREE_PLAN, PLAN_LIMITS, PLAN_FEATURES, formatLimit } from "../lib/plans";
+import { BILLING_TEST, forgetCachedPlan, getActivePlan } from "../models/billing.server";
 import { getMonthlyOrderCount } from "../models/usage.server";
 
 const PLAN_INFO = [
@@ -26,33 +26,37 @@ const PLAN_INFO = [
     price: "$0",
     tagline: "Get started",
     limit: `${formatLimit(PLAN_LIMITS.Free.orders)} orders / month`,
-    features: ["COD order form", "Orders dashboard", "1 upsell offer", "Community support"],
+    features: PLAN_FEATURES.Free,
   },
   {
     name: PLANS.BASIC,
     price: "$9.95",
     tagline: "For growing stores",
     limit: `${formatLimit(PLAN_LIMITS.Basic.orders)} orders / month`,
-    features: ["Everything in Free", "Marketing pixels", "Google Sheets export", "OTP fraud protection", "Unlimited upsells"],
+    features: PLAN_FEATURES.Basic,
   },
   {
     name: PLANS.ADVANCED,
     price: "$24.95",
     tagline: "For scaling stores",
     limit: `${formatLimit(PLAN_LIMITS.Advanced.orders)} orders / month`,
-    features: ["Everything in Basic", "SMS & WhatsApp", "IP & postal blocking", "Priority support", "Advanced analytics"],
+    features: PLAN_FEATURES.Advanced,
   },
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
+  // Landing here is also where Shopify returns after a plan change, so make
+  // the storefront re-read the plan instead of serving a cached one.
+  forgetCachedPlan(session.shop);
   const active = await getActivePlan(admin);
   const used = await getMonthlyOrderCount(session.shop);
   return { active, used, limit: PLAN_LIMITS[active].orders, isTest: BILLING_TEST };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
+  forgetCachedPlan(session.shop);
   const form = await request.formData();
   const plan = String(form.get("plan"));
 
@@ -94,7 +98,7 @@ export default function PlansPage() {
               {limit < 0
                 ? `${used.toLocaleString("en-US")} COD orders this month — unlimited on your plan.`
                 : `${used.toLocaleString("en-US")} of ${formatLimit(limit)} COD orders used this month.`}
-              {nearLimit && " Upgrade to keep accepting orders once the limit is reached."}
+              {nearLimit && " When the limit is reached the COD button is hidden on your store until next month — upgrade to keep it showing."}
             </Text>
           </Banner>
         </Layout.Section>

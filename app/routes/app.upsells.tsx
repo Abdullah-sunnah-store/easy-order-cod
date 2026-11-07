@@ -74,7 +74,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       offerPrice: String(form.get("offerPrice") || ""),
       offerProductCount:
         parseInt(String(form.get("offerProductCount") || "0"), 10) || 0,
-      discountPercent: parseInt(String(form.get("discountPercent") || "0"), 10) || 0,
+      // Always 0: the app cannot discount a checkout line, so it never stores one.
+      discountPercent: 0,
       minQuantity: parseInt(String(form.get("minQuantity") || "1"), 10) || 1,
     });
     return { ok: true, created: true };
@@ -342,7 +343,6 @@ export default function UpsellsPage() {
                   { title: "Offer" },
                   { title: "Type" },
                   { title: "Offered item" },
-                  { title: "Discount" },
                   { title: "Status" },
                   { title: "Actions" },
                 ]}
@@ -374,7 +374,6 @@ export default function UpsellsPage() {
                         "—"
                       )}
                     </IndexTable.Cell>
-                    <IndexTable.Cell>{u.discountPercent}%</IndexTable.Cell>
                     <IndexTable.Cell>
                       <Badge tone={u.enabled ? "success" : undefined}>
                         {u.enabled ? "Active" : "Off"}

@@ -41,3 +41,25 @@ export async function getActivePlan(admin: AdminClient): Promise<PlanName> {
     return FREE_PLAN;
   }
 }
+
+// Storefront requests (/apps/cod/settings) arrive on every product page view.
+// Asking Shopify for the plan each time made each view cost an Admin API call,
+// which is slow and eats the shop's rate limit. A warm serverless instance
+// keeps the answer for a few minutes; a plan change shows up on the storefront
+// within that window, and the admin pages always ask Shopify directly.
+const PLAN_TTL_MS = 5 * 60 * 1000;
+const planCache = new Map<string, { plan: PlanName; at: number }>();
+
+export async function getActivePlanCached(shop: string, admin: AdminClient): Promise<PlanName> {
+  const hit = planCache.get(shop);
+  if (hit && Date.now() - hit.at < PLAN_TTL_MS) return hit.plan;
+  const plan = await getActivePlan(admin);
+  planCache.set(shop, { plan, at: Date.now() });
+  if (planCache.size > 5000) planCache.delete(planCache.keys().next().value as string);
+  return plan;
+}
+
+/** Drop the cached plan after a subscription change in this instance. */
+export function forgetCachedPlan(shop: string) {
+  planCache.delete(shop);
+}

@@ -8,7 +8,6 @@ import {
   BlockStack,
   List,
   TextField,
-  Checkbox,
   Text,
   Button,
 } from "@shopify/polaris";
@@ -18,39 +17,38 @@ import { getCodSettings, updateCodSettings } from "../models/codSettings.server"
 import { getActivePlan } from "../models/billing.server";
 import { can, FEATURE_MIN_PLAN } from "../lib/plans";
 import { UpgradeNotice } from "../components/UpgradeNotice";
+import { CUSTOMER_LIMIT_TAG, POSTAL_TAG } from "../lib/reviewTags";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const settings = await getCodSettings(session.shop);
   const plan = await getActivePlan(admin);
   return {
-    settings,
-    entitlements: { otp: can(plan, "otp"), ipBlocking: can(plan, "ipBlocking") },
+    settings: {
+      blockedPostalCodes: settings.blockedPostalCodes,
+      maxOrdersPerPhone: settings.maxOrdersPerPhone,
+    },
+    entitlements: { postalBlocking: can(plan, "postalBlocking") },
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const form = await request.formData();
-  const int = (k: string) => parseInt(String(form.get(k) || "0"), 10) || 0;
+  const max = Math.max(0, Math.min(1000, parseInt(String(form.get("maxOrdersPerPhone") || "0"), 10) || 0));
 
   // Locked fields keep their stored value regardless of what was posted.
   const plan = await getActivePlan(admin);
   const existing = await getCodSettings(session.shop);
-  const otp = can(plan, "otp");
-  const ipBlocking = can(plan, "ipBlocking");
+  const postal = can(plan, "postalBlocking");
 
   await updateCodSettings(session.shop, {
-    otpEnabled: otp ? form.get("otpEnabled") === "true" : existing.otpEnabled,
-    phoneConfirmation: form.get("phoneConfirmation") === "true",
-    ipBlockingEnabled: ipBlocking
-      ? form.get("ipBlockingEnabled") === "true"
-      : existing.ipBlockingEnabled,
-    blockedIps: ipBlocking ? String(form.get("blockedIps") || "") : existing.blockedIps,
-    blockedPostalCodes: ipBlocking
-      ? String(form.get("blockedPostalCodes") || "")
+    blockedPostalCodes: postal
+      ? String(form.get("blockedPostalCodes") || "").slice(0, 5000)
       : existing.blockedPostalCodes,
-    maxOrdersPerPhone: int("maxOrdersPerPhone"),
+    // Column name kept to avoid a destructive migration; it now limits COD
+    // orders per Shopify customer in 30 days.
+    maxOrdersPerPhone: max,
   });
   return { ok: true };
 };
@@ -69,19 +67,13 @@ export default function ProtectionPage() {
   }, [fetcher.data, shopify]);
 
   const set =
-    (key: keyof typeof state) => (value: string | boolean) =>
+    (key: keyof typeof state) => (value: string) =>
       setState((prev) => ({ ...prev, [key]: value }));
 
   const save = () => {
     const fd = new FormData();
-    [
-      "otpEnabled",
-      "phoneConfirmation",
-      "ipBlockingEnabled",
-      "blockedIps",
-      "blockedPostalCodes",
-      "maxOrdersPerPhone",
-    ].forEach((k) => fd.append(k, String((state as any)[k])));
+    fd.append("blockedPostalCodes", String(state.blockedPostalCodes));
+    fd.append("maxOrdersPerPhone", String(state.maxOrdersPerPhone));
     fetcher.submit(fd, { method: "POST" });
   };
 
@@ -95,51 +87,33 @@ export default function ProtectionPage() {
           <BlockStack gap="500">
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Fraud prevention</Text>
-                {!entitlements.otp && <UpgradeNotice required={FEATURE_MIN_PLAN.otp} />}
-                <Checkbox
-                  label="Require OTP verification (SMS/WhatsApp) before an order is placed"
-                  helpText="Reduces fake COD orders. Requires an SMS/WhatsApp provider on the Connections page."
-                  checked={state.otpEnabled}
-                  onChange={set("otpEnabled")}
-                  disabled={!entitlements.otp}
-                />
-                <Checkbox
-                  label="Ask customers to confirm their phone number"
-                  checked={state.phoneConfirmation}
-                  onChange={set("phoneConfirmation")}
-                />
-                {!entitlements.ipBlocking && <UpgradeNotice required={FEATURE_MIN_PLAN.ipBlocking} />}
-                <Checkbox
-                  label="Enable IP blocking"
-                  checked={state.ipBlockingEnabled}
-                  onChange={set("ipBlockingEnabled")}
-                  disabled={!entitlements.ipBlocking}
-                />
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Review suspicious COD orders</Text>
+                  <Text as="p" tone="subdued">
+                    Customers enter their address and phone in Shopify checkout, so the
+                    app can't stop an order before it's placed. Instead it tags matching
+                    COD orders the moment they arrive, so you can call or cancel before
+                    shipping. Filter your Orders list by the tag to see them.
+                  </Text>
+                </BlockStack>
+                {!entitlements.postalBlocking && <UpgradeNotice required={FEATURE_MIN_PLAN.postalBlocking} />}
                 <TextField
-                  label="Blocked IP addresses"
+                  label="Postal / ZIP codes to review"
                   autoComplete="off"
                   multiline={3}
-                  value={state.blockedIps}
-                  onChange={set("blockedIps")}
-                  disabled={!entitlements.ipBlocking || !state.ipBlockingEnabled}
-                  helpText="One IP per line."
-                />
-                <TextField
-                  label="Blocked postal / ZIP codes"
-                  autoComplete="off"
-                  multiline={2}
                   value={state.blockedPostalCodes}
                   onChange={set("blockedPostalCodes")}
-                  disabled={!entitlements.ipBlocking}
-                  helpText="Comma-separated. Orders to these codes are rejected."
+                  disabled={!entitlements.postalBlocking}
+                  helpText={`Comma- or line-separated. End with * to match a prefix (1212*). Matching orders get the tag ${POSTAL_TAG}.`}
                 />
                 <TextField
-                  label="Max orders per phone number (0 = unlimited)"
+                  label="Max COD orders per customer in 30 days (0 = off)"
                   autoComplete="off"
                   type="number"
+                  min={0}
                   value={String(state.maxOrdersPerPhone)}
                   onChange={set("maxOrdersPerPhone")}
+                  helpText={`Orders beyond this get the tag ${CUSTOMER_LIMIT_TAG}. Customers are matched by their Shopify customer account (email or phone).`}
                 />
                 <div>
                   <Button variant="primary" loading={saving} onClick={save}>Save</Button>

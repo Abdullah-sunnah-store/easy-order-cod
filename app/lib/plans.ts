@@ -21,24 +21,25 @@ export const PLAN_LIMITS: Record<PlanName, { orders: number; upsells: number }> 
   Advanced: { orders: 10000, upsells: -1 },
 };
 
-export type Feature =
-  | "pixels"
-  | "sheets"
-  | "otp"
-  | "sms"
-  | "whatsapp"
-  | "ipBlocking"
-  | "analytics";
+// Only features the app actually delivers. OTP, SMS, WhatsApp and IP blocking
+// were removed: Shopify checkout collects the phone and address, so the app has
+// no point at which it could verify or block a customer before the order.
+export type Feature = "pixels" | "sheets" | "postalBlocking" | "analytics";
 
 // Lowest plan that unlocks each feature.
 export const FEATURE_MIN_PLAN: Record<Feature, PlanName> = {
   pixels: PLANS.BASIC,
   sheets: PLANS.BASIC,
-  otp: PLANS.BASIC,
-  sms: PLANS.ADVANCED,
-  whatsapp: PLANS.ADVANCED,
-  ipBlocking: PLANS.ADVANCED,
+  postalBlocking: PLANS.ADVANCED,
   analytics: PLANS.ADVANCED,
+};
+
+// What each plan card lists on the Plans page. Every line here must be a
+// feature that works today — App Store review and merchants both hold us to it.
+export const PLAN_FEATURES: Record<PlanName, string[]> = {
+  Free: ["COD checkout button", "Orders dashboard", "1 upsell offer", "Max orders per phone (review tag)"],
+  Basic: ["Everything in Free", "Marketing pixels (Facebook, TikTok, Google, Snapchat, Pinterest)", "Google Sheets export", "Unlimited upsells"],
+  Advanced: ["Everything in Basic", "Postal code blocking (review tag)", "Analytics: monthly orders, revenue, flagged", "Priority support"],
 };
 
 export function planRank(plan: PlanName): number {
