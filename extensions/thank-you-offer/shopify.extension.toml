@@ -16,6 +16,7 @@ api_version = "2026-07"
 [[extensions]]
 name = "Easy order COD offer"
 handle = "thank-you-offer"
+uid = "01b624ae-aed7-dfa8-2667-77f5f60a98b5ebf8ec58"
 type = "ui_extension"
 
 [[extensions.targeting]]
