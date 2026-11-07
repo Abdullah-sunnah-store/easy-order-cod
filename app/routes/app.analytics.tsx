@@ -13,6 +13,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { getActivePlan } from "../models/billing.server";
 import { getMonthlyHistory } from "../models/usage.server";
+import { getFunnel } from "../models/funnel.server";
 import { can, FEATURE_MIN_PLAN } from "../lib/plans";
 import { UpgradeNotice } from "../components/UpgradeNotice";
 
@@ -40,6 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     allowed,
     currency,
     months: allowed ? await getMonthlyHistory(session.shop, 6) : [],
+    funnel: allowed ? await getFunnel(session.shop, 30) : [],
   };
 };
 
@@ -53,7 +55,12 @@ function monthLabel(period: string) {
 }
 
 export default function AnalyticsPage() {
-  const { allowed, currency, months } = useLoaderData<typeof loader>();
+  const { allowed, currency, months, funnel } = useLoaderData<typeof loader>();
+  const f = funnel.reduce(
+    (t, d) => ({ views: t.views + d.views, opens: t.opens + d.opens, checkouts: t.checkouts + d.checkouts, orders: t.orders + d.orders }),
+    { views: 0, opens: 0, checkouts: 0, orders: 0 },
+  );
+  const rate = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "—");
   const money = (n: number) =>
     `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ""}`;
 
@@ -102,6 +109,31 @@ export default function AnalyticsPage() {
                   </BlockStack>
                 </Card>
               </InlineGrid>
+            </Layout.Section>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Funnel — last 30 days</Text>
+                  <InlineGrid columns={{ xs: 2, md: 4 }} gap="300">
+                    {[
+                      { label: "Button shown", value: f.views, sub: "product page views" },
+                      { label: "Form opened", value: f.opens, sub: `${rate(f.opens, f.views)} of views` },
+                      { label: "Sent to checkout", value: f.checkouts, sub: `${rate(f.checkouts, f.opens)} of opens` },
+                      { label: "COD orders", value: f.orders, sub: `${rate(f.orders, f.checkouts)} of checkouts` },
+                    ].map((step) => (
+                      <BlockStack key={step.label} gap="050">
+                        <Text as="span" tone="subdued">{step.label}</Text>
+                        <Text as="p" variant="headingXl">{step.value.toLocaleString("en-US")}</Text>
+                        <Text as="span" variant="bodySm" tone="subdued">{step.sub}</Text>
+                      </BlockStack>
+                    ))}
+                  </InlineGrid>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Overall: {rate(f.orders, f.views)} of visitors who saw the button placed a COD
+                    order. Funnel counting started with this version.
+                  </Text>
+                </BlockStack>
+              </Card>
             </Layout.Section>
             <Layout.Section>
               <Card padding="0">

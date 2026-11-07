@@ -296,3 +296,60 @@
 
 /* Buy-button subtitle (set by cod-form.js). */
 .cod__sub { font-size: .8em; font-weight: 400; opacity: .85; }
+
+/* ---- Quantity offers ("Buy 2, save 10%") -------------------------------- */
+.cod__tiers { display: grid; gap: 0.5rem; margin-bottom: 0.9rem; }
+.cod__tier {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1.5px solid var(--cod-input-border, #d0d0d0);
+  border-radius: var(--cod-input-radius, 8px);
+  background: var(--cod-input-bg, #fff);
+  cursor: pointer;
+}
+.cod__tier:has(input:checked) { border-color: var(--cod-accent, #e02424); box-shadow: 0 0 0 1px var(--cod-accent, #e02424); }
+.cod__tier input { accent-color: var(--cod-accent, #e02424); flex-shrink: 0; }
+.cod__tier-name { flex: 1; min-width: 0; font-weight: 600; }
+.cod__tier-badge {
+  font-style: normal;
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 0.15em 0.5em;
+  border-radius: 999px;
+  background: var(--cod-accent, #e02424);
+  color: #fff;
+  margin-left: 0.3em;
+  white-space: nowrap;
+}
+.cod__tier-save { display: block; font-weight: 500; font-size: 0.8em; color: var(--cod-accent, #e02424); }
+.cod__tier-price { white-space: nowrap; text-align: right; }
+.cod__tier-price s, .cod__line s { opacity: 0.55; font-weight: 400; margin-right: 0.2em; }
+.cod__line--save b { color: var(--cod-accent, #e02424); }
+
+/* ---- Downsell ----------------------------------------------------------- */
+.cod__modal { position: relative; }
+.cod__ds {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.7rem;
+  padding: 1.6rem;
+  background: var(--cod-modal-bg, #fff);
+  border-radius: inherit;
+  text-align: center;
+}
+.cod__ds-title { font-size: 1.35em; font-weight: 800; margin: 0 0 0.4rem; }
+.cod__ds-no { border: 0; background: none; color: inherit; opacity: 0.7; text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* Right-to-left languages (Arabic, Urdu). */
+.cod__overlay[dir="rtl"] .cod__close { right: auto; left: 0; }
+.cod__overlay[dir="rtl"] .cod__head { padding-right: 0; padding-left: 1.4em; }
+
+/* Rows the script hides (the plain quantity field when tiers show). The row's
+   own display rule would otherwise beat the [hidden] attribute. */
+.cod__form [hidden] { display: none !important; }

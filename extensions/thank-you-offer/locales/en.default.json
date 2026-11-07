@@ -1,0 +1,7 @@
+{
+  "offer": "Here's {{percent}}% off your next order.",
+  "code": "Your code: {{code}}",
+  "once": "Applied automatically when you shop from here. One use per customer.",
+  "shop": "Shop now",
+  "recommended": "You might also like"
+}

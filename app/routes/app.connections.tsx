@@ -15,6 +15,7 @@ import {
   Banner,
   List,
   Box,
+  Select,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -22,6 +23,7 @@ import { getConnections, updateConnections } from "../models/connections.server"
 import { getActivePlan } from "../models/billing.server";
 import { APPS_SCRIPT_SOURCE, isValidSheetsUrl, sendToSheet } from "../models/sheets.server";
 import { can, FEATURE_MIN_PLAN } from "../lib/plans";
+import { parseProductPixels } from "../models/productPixels.server";
 import { UpgradeNotice } from "../components/UpgradeNotice";
 
 // Pixel IDs are pasted by the merchant and echoed into storefront script URLs,
@@ -42,9 +44,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       googleSheetsEnabled: connections.googleSheetsEnabled,
       googleSheetUrl: connections.googleSheetUrl,
     },
+    productPixels: parseProductPixels(connections.productPixels),
     entitlements: {
       pixels: can(plan, "pixels"),
       sheets: can(plan, "sheets"),
+      productPixels: can(plan, "productPixels"),
     },
     appsScript: APPS_SCRIPT_SOURCE,
   };
@@ -62,6 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const keep = <T,>(allowed: boolean, next: T, current: T) => (allowed ? next : current);
   const pixels = can(plan, "pixels");
   const sheets = can(plan, "sheets");
+  const productPixels = can(plan, "productPixels");
 
   const sheetsEnabled = form.get("googleSheetsEnabled") === "true";
   const sheetUrl = str("googleSheetUrl");
@@ -109,12 +114,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     pinterestTagId: keep(pixels, cleanId(str("pinterestTagId")), existing.pinterestTagId),
     googleSheetsEnabled: keep(sheets, sheetsEnabled, existing.googleSheetsEnabled),
     googleSheetUrl: keep(sheets, sheetUrl, existing.googleSheetUrl),
+    productPixels: keep(
+      productPixels,
+      JSON.stringify(parseProductPixels(String(form.get("productPixels") || "[]"))),
+      existing.productPixels,
+    ),
   });
   return { ok: true, message: "Connections saved" };
 };
 
 export default function ConnectionsPage() {
-  const { connections, entitlements, appsScript } = useLoaderData<typeof loader>();
+  const { connections, entitlements, appsScript, productPixels } = useLoaderData<typeof loader>();
+  const [rules, setRules] = useState(productPixels);
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const [state, setState] = useState(connections);
@@ -132,6 +143,7 @@ export default function ConnectionsPage() {
   const submit = (intent: "save" | "testSheet") => {
     const fd = new FormData();
     Object.entries(state).forEach(([k, v]) => fd.append(k, String(v)));
+    fd.append("productPixels", JSON.stringify(rules));
     fd.append("intent", intent);
     fetcher.submit(fd, { method: "POST" });
   };
@@ -171,6 +183,89 @@ export default function ConnectionsPage() {
                     Google or TikTok sales channel app.
                   </p>
                 </Banner>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Product-specific pixels</Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Extra pixels that load only on the products you choose — e.g. a separate
+                    Facebook pixel for one product's ad account. They add to the pixels above.
+                  </Text>
+                </BlockStack>
+                {!entitlements.productPixels && <UpgradeNotice required={FEATURE_MIN_PLAN.productPixels} />}
+                {rules.map((rule, i) => (
+                  <Box key={i} padding="300" background="bg-surface-secondary" borderRadius="200">
+                    <BlockStack gap="200">
+                      <InlineGrid columns={{ xs: 1, sm: 2 }} gap="200">
+                        <Select
+                          label="Platform"
+                          options={[
+                            { label: "Facebook", value: "facebook" },
+                            { label: "TikTok", value: "tiktok" },
+                            { label: "Google", value: "google" },
+                            { label: "Snapchat", value: "snapchat" },
+                            { label: "Pinterest", value: "pinterest" },
+                          ]}
+                          value={rule.platform}
+                          onChange={(v) => setRules((prev) => prev.map((r, j) => (j === i ? { ...r, platform: v as any } : r)))}
+                          disabled={!entitlements.productPixels}
+                        />
+                        <TextField
+                          label="Pixel / tag ID"
+                          autoComplete="off"
+                          value={rule.id}
+                          onChange={(v) => setRules((prev) => prev.map((r, j) => (j === i ? { ...r, id: v } : r)))}
+                          disabled={!entitlements.productPixels}
+                        />
+                      </InlineGrid>
+                      <InlineStack gap="200" blockAlign="center">
+                        <Text as="span" tone="subdued">
+                          {rule.productTitles?.length ? rule.productTitles.join(", ") : "No products chosen"}
+                        </Text>
+                        <Button
+                          disabled={!entitlements.productPixels}
+                          onClick={async () => {
+                            const selection: any = await shopify.resourcePicker({
+                              type: "product",
+                              action: "select",
+                              multiple: true,
+                              filter: { variants: false },
+                              selectionIds: rule.productIds.map((id) => ({ id })),
+                            });
+                            if (!selection) return;
+                            setRules((prev) =>
+                              prev.map((r, j) =>
+                                j === i
+                                  ? { ...r, productIds: selection.map((p: any) => p.id), productTitles: selection.map((p: any) => p.title) }
+                                  : r,
+                              ),
+                            );
+                          }}
+                        >
+                          Choose products
+                        </Button>
+                        <Button variant="plain" tone="critical" onClick={() => setRules((prev) => prev.filter((_, j) => j !== i))}>
+                          Remove
+                        </Button>
+                      </InlineStack>
+                    </BlockStack>
+                  </Box>
+                ))}
+                <InlineStack gap="200">
+                  <Button
+                    disabled={!entitlements.productPixels}
+                    onClick={() => setRules((prev) => [...prev, { platform: "facebook", id: "", productIds: [], productTitles: [] }])}
+                  >
+                    Add product pixel
+                  </Button>
+                  <Button variant="primary" loading={busy} onClick={() => submit("save")}>Save connections</Button>
+                </InlineStack>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  A rule without an ID or products is dropped on save.
+                </Text>
               </BlockStack>
             </Card>
 

@@ -1,4 +1,4 @@
-import { PLANS, FREE_PLAN, type PlanName } from "../lib/plans";
+import { FREE_PLAN, billingPlan, planRank, type BillingCycle, type PlanName } from "../lib/plans";
 
 // Whether charges are created in Shopify's test mode (no real money moves).
 // Defaults to test everywhere except production, so a forgotten flag can never
@@ -34,11 +34,42 @@ export async function getActivePlan(admin: AdminClient): Promise<PlanName> {
       .filter((s: any) => s?.status === "ACTIVE")
       .map((s: any) => s?.name);
 
-    if (names.includes(PLANS.ADVANCED)) return PLANS.ADVANCED;
-    if (names.includes(PLANS.BASIC)) return PLANS.BASIC;
-    return FREE_PLAN;
+    return highestTier(names);
   } catch {
     return FREE_PLAN;
+  }
+}
+
+/** The best tier among the shop's active subscription names. */
+export function highestTier(names: string[]): PlanName {
+  let best: PlanName = FREE_PLAN;
+  for (const name of names) {
+    const tier = billingPlan(name)?.tier;
+    if (tier && planRank(tier) > planRank(best)) best = tier;
+  }
+  return best;
+}
+
+/** Plan + billing cycle for the Plans page, which shows which one is active. */
+export async function getActiveSubscription(
+  admin: AdminClient,
+): Promise<{ plan: PlanName; cycle: BillingCycle | null; key: string | null }> {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query ActiveSubscription {
+        currentAppInstallation { activeSubscriptions { name status } }
+      }`,
+    );
+    const body: any = await response.json();
+    const names: string[] = (body?.data?.currentAppInstallation?.activeSubscriptions ?? [])
+      .filter((s: any) => s?.status === "ACTIVE")
+      .map((s: any) => s?.name);
+    const plan = highestTier(names);
+    const key = names.find((n) => billingPlan(n)?.tier === plan) ?? null;
+    return { plan, cycle: key ? billingPlan(key)!.cycle : null, key };
+  } catch {
+    return { plan: FREE_PLAN, cycle: null, key: null };
   }
 }
 

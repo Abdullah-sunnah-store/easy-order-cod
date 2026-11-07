@@ -20,6 +20,7 @@ import { authenticate } from "../shopify.server";
 import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { listUpsells } from "../models/upsells.server";
+import { listQuantityOffers } from "../models/quantityOffers.server";
 import { getActivePlan } from "../models/billing.server";
 import { getMonthlyOrderCount } from "../models/usage.server";
 import { can, orderLimit, formatLimit } from "../lib/plans";
@@ -29,6 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const settings = await getCodSettings(session.shop);
   const connections = await getConnections(session.shop);
   const upsells = await listUpsells(session.shop);
+  const quantityOffers = await listQuantityOffers(session.shop);
   const plan = await getActivePlan(admin);
   const limit = orderLimit(plan);
   const used = await getMonthlyOrderCount(session.shop);
@@ -87,6 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       formEnabled: settings.enabled,
       hasPixels,
       hasUpsells: upsells.length > 0,
+      hasQuantityOffers: quantityOffers.length > 0,
       fraudOn:
         settings.maxOrdersPerPhone > 0 ||
         (can(plan, "postalBlocking") && settings.blockedPostalCodes.trim() !== ""),
@@ -180,6 +183,9 @@ export default function Dashboard() {
                   <ChecklistItem done={checklist.fraudOn}>
                     Review rules set (repeat customers or postal codes)
                   </ChecklistItem>
+                  <ChecklistItem done={checklist.hasQuantityOffers}>
+                    Quantity offer created (Buy 2, save 10%…)
+                  </ChecklistItem>
                   <ChecklistItem done={checklist.hasUpsells}>
                     At least one upsell offer created
                   </ChecklistItem>
@@ -187,6 +193,7 @@ export default function Dashboard() {
                 <InlineStack gap="300">
                   <Button url="/app/settings" variant="primary">Form settings</Button>
                   <Button url="/app/connections">Connections</Button>
+                  <Button url="/app/offers">Quantity offers</Button>
                   <Button url="/app/upsells">Upsells</Button>
                 </InlineStack>
               </BlockStack>

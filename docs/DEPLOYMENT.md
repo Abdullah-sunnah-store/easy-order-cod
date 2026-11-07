@@ -59,7 +59,7 @@ the README. What changed:
 ### What must be true before resubmitting
 
 1. **Scopes changed.** `read_shipping` is gone. Update `SCOPES` in Vercel →
-   Settings → Environment Variables to `read_orders,write_orders,read_products`
+   Settings → Environment Variables to `read_orders,write_orders,read_products,write_discounts`
    and redeploy, or the value the app boots with will not match the config it
    released. Installed shops are re-prompted through `app/scopes_update`.
 2. **A new webhook subscription** (`orders/create`) ships with the release. It
@@ -176,7 +176,7 @@ the old path.
    | --- | --- |
    | `SHOPIFY_API_KEY` | `7d6846fb9f944b6701f6cc35b77eab6f` (the `client_id`) |
    | `SHOPIFY_API_SECRET` | Partner Dashboard → your app → API credentials |
-   | `SCOPES` | `read_orders,write_orders,read_products` |
+   | `SCOPES` | `read_orders,write_orders,read_products,write_discounts` |
    | `DATABASE_URL` | the Neon **production** pooled connection string |
 
    `SHOPIFY_APP_URL` is optional: unset, the app falls back to Vercel's

@@ -13,11 +13,21 @@
     return (s && s.currency && s.currency.active) || undefined;
   }
 
-  fetch("/apps/cod/settings", { headers: { Accept: "application/json" } })
+  // On a product page, ask for that product's extra pixels too (Advanced plan).
+  var meta = window.ShopifyAnalytics && window.ShopifyAnalytics.meta;
+  var product = (meta && meta.product && meta.product.id) || "";
+  fetch("/apps/cod/settings?product=" + encodeURIComponent(product), { headers: { Accept: "application/json" } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (cfg) {
       if (!cfg || !cfg.pixels) return;
       var p = cfg.pixels;
+      // Product-specific pixels: the first ID per platform loads the library
+      // below; any further IDs are initialised on the same library afterwards.
+      var extra = {};
+      (p.extra || []).forEach(function (x) {
+        if (!p[x.platform]) p[x.platform] = x.id;
+        else if (p[x.platform] !== x.id) (extra[x.platform] = extra[x.platform] || []).push(x.id);
+      });
 
       // Facebook Pixel
       if (p.facebook) {
@@ -30,6 +40,7 @@
           s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s);
         })(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
         window.fbq("init", p.facebook);
+        (extra.facebook || []).forEach(function (id) { window.fbq("init", id); });
         window.fbq("track", "PageView");
         ready.push(function (value, cur) {
           window.fbq("track", "InitiateCheckout", { value: value, currency: cur });
@@ -51,6 +62,7 @@
             var a = d.getElementsByTagName("script")[0]; a.parentNode.insertBefore(o, a);
           };
           ttq.load(p.tiktok);
+          (extra.tiktok || []).forEach(function (id) { ttq.load(id); });
           ttq.page();
         })(window, document, "ttq");
         ready.push(function (value, cur) {
@@ -69,6 +81,7 @@
         window.gtag = window.gtag || gtag;
         gtag("js", new Date());
         gtag("config", p.google);
+        (extra.google || []).forEach(function (id) { gtag("config", id); });
         ready.push(function (value, cur) {
           gtag("event", "begin_checkout", { value: value, currency: cur });
         });
@@ -86,6 +99,7 @@
           var u = t.getElementsByTagName("script")[0]; u.parentNode.insertBefore(r, u);
         })(window, document, "https://sc-static.net/scevent.min.js");
         window.snaptr("init", p.snapchat, {});
+        (extra.snapchat || []).forEach(function (id) { window.snaptr("init", id, {}); });
         window.snaptr("track", "PAGE_VIEW");
         ready.push(function (value, cur) {
           window.snaptr("track", "START_CHECKOUT", { price: value, currency: cur });
@@ -102,6 +116,7 @@
           var r = document.getElementsByTagName("script")[0]; r.parentNode.insertBefore(t, r);
         })("https://s.pinimg.com/ct/core.js");
         window.pintrk("load", p.pinterest);
+        (extra.pinterest || []).forEach(function (id) { window.pintrk("load", id); });
         window.pintrk("page");
         ready.push(function (value, cur) {
           window.pintrk("track", "addtocart", { value: value, currency: cur });

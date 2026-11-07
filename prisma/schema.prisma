@@ -119,6 +119,30 @@ model CodSettings {
   shippingFallbackLabel String  @default("Delivery charge")
   // Form-builder appearance (JSON: form type, button styling, colors, radius…)
   builderConfig  String   @default("{}")
+  // Storefront wording per language: { "fr": { "heading": "…", … } }. English
+  // comes from the fields above; a missing key falls back to it.
+  translations   String   @default("{}")
+  // Last design template applied from the Templates page (display only).
+  templateId     String   @default("")
+  // Downsell: offered once when a customer closes the form without ordering.
+  // Backed by a real Shopify code discount (downsellDiscountId) applied at
+  // checkout through /discount/<code>.
+  downsellEnabled    Boolean @default(false)
+  downsellPercent    Int     @default(0)
+  downsellCode       String  @default("")
+  downsellDiscountId String  @default("")
+  // Smart recommendations: Shopify's own complementary/related products,
+  // offered as add-ons in the form (Unlimited plan).
+  recommendEnabled   Boolean @default(false)
+  recommendLimit     Int     @default(2)
+  // Thank-you page offer: a once-per-customer code for the next order, shown
+  // by the thank-you-offer checkout extension (read from an app metafield).
+  thankYouEnabled    Boolean @default(false)
+  thankYouPercent    Int     @default(0)
+  thankYouHeading    String  @default("Thanks for your order!")
+  thankYouCode       String  @default("")
+  thankYouDiscountId String  @default("")
+  thankYouRecommend  Boolean @default(true)
   updatedAt      DateTime @updatedAt
 }
 
@@ -137,6 +161,9 @@ model Connections {
   smsSenderId        String   @default("")
   whatsappEnabled    Boolean  @default(false)
   whatsappPhone      String   @default("")
+  // Extra pixels that load only on chosen products:
+  // [{ platform: "facebook"|"tiktok"|"google"|"snapchat"|"pinterest", id, productIds: [gid] }]
+  productPixels      String   @default("[]")
   updatedAt          DateTime @updatedAt
 }
 
@@ -190,7 +217,46 @@ model Upsell {
   discountPercent   Int      @default(0)
   minQuantity       Int      @default(1)
   enabled           Boolean  @default(true)
+  // Products this offer belongs to (JSON array of product GIDs). Empty = shown
+  // with every product. Required for a discounted offer: Shopify's buy-X-get-Y
+  // discount needs named products to buy.
+  triggerProductIds String   @default("[]")
+  triggerTitles     String   @default("[]")
+  // The Shopify automatic discount that prices this offer at checkout.
+  discountId        String   @default("")
   createdAt         DateTime @default(now())
 
   @@index([shop])
+}
+
+// Quantity breaks ("Buy 2, save 10%"). Each tier is a real Shopify automatic
+// discount, so the price shown in the form is the price checkout charges.
+model QuantityOffer {
+  id            String   @id @default(cuid())
+  shop          String
+  title         String   @default("Quantity offer")
+  // JSON array of product GIDs; empty = every product.
+  productIds    String   @default("[]")
+  productTitles String   @default("[]")
+  // JSON array of { qty, percent, label, badge }, ascending by qty.
+  tiers         String   @default("[]")
+  // JSON array of Shopify automatic discount GIDs, one per discounted tier.
+  discountIds   String   @default("[]")
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@index([shop])
+}
+
+// Daily storefront funnel per shop: button shown → form opened → sent to
+// checkout. Counts only — no visitor data.
+model FunnelStat {
+  shop      String
+  day       String // "YYYY-MM-DD" UTC
+  views     Int      @default(0)
+  opens     Int      @default(0)
+  checkouts Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([shop, day])
 }

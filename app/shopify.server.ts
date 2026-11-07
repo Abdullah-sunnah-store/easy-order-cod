@@ -7,7 +7,7 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
-import { PLANS } from "./lib/plans";
+import { BILLING_PLANS, PLANS } from "./lib/plans";
 
 // Re-exported for convenience; the source of truth lives in ./lib/plans.
 export { PLANS };
@@ -53,26 +53,22 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
-  billing: {
-    [PLANS.BASIC]: {
-      lineItems: [
-        {
-          amount: 9.95,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
-    },
-    [PLANS.ADVANCED]: {
-      lineItems: [
-        {
-          amount: 24.95,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
-    },
-  },
+  // One entry per sellable subscription (monthly and yearly of each tier),
+  // generated from the same list the Plans page renders.
+  billing: Object.fromEntries(
+    BILLING_PLANS.map((p) => [
+      p.key,
+      {
+        lineItems: [
+          {
+            amount: p.amount,
+            currencyCode: "USD",
+            interval: p.cycle === "yearly" ? BillingInterval.Annual : BillingInterval.Every30Days,
+          },
+        ],
+      },
+    ]),
+  ) as any,
   future: {
     unstable_newEmbeddedAuthStrategy: true,
     expiringOfflineAccessTokens: true,

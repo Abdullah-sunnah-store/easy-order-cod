@@ -33,6 +33,9 @@
       /cart. Every other cart URL is derived from this one in cod-form.js.
     {% endcomment %}
     data-cart-url="{{ routes.cart_url }}"
+    {% comment %} Picks this product's offers and the visitor's language. {% endcomment %}
+    data-product-id="{{ product.id }}"
+    data-locale="{{ request.locale.iso_code }}"
   >
     <button type="button" class="cod__open" data-cod-open>Cash on Delivery</button>
 
@@ -44,6 +47,8 @@
         </div>
 
         <form class="cod__form" data-cod-form-el>
+          {% comment %} Quantity offers ("Buy 2, save 10%") replace the plain quantity field when the app has any for this product. {% endcomment %}
+          <div class="cod__tiers" data-cod-tiers hidden></div>
           <div class="cod__row cod__qty" data-cod-field="quantity"><label>Quantity</label><input type="number" name="quantity" value="1" min="1" data-cod-qty /></div>
 
           {% comment %} Add-on offers are rendered by cod-form.js from the app settings. {% endcomment %}
@@ -70,6 +75,8 @@
       </div>
     </div>
   </div>
+  {% comment %} Appearance, countdown and templates (kept apart to stay under the 10 KB per-file limit). {% endcomment %}
+  <script src="{{ 'cod-style.js' | asset_url }}" defer></script>
 {% endif %}
 
 {% schema %}

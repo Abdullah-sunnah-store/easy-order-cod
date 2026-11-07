@@ -1,4 +1,5 @@
 import { listUpsells } from "./upsells.server";
+import { parseIds } from "./discounts.server";
 
 // Turns the offers stored on the Upsells page into something the storefront can
 // actually add to an order.
@@ -24,6 +25,8 @@ export type ResolvedOffer = {
   kind: string; // "product" | "collection"
   discountPercent: number;
   minQuantity: number;
+  /** Product GIDs the offer belongs to; empty = every product. */
+  triggerProductIds: string[];
   /** Source label, e.g. the collection's name. */
   sourceTitle: string;
   items: OfferItem[];
@@ -79,6 +82,7 @@ async function resolveOne(
     kind: offer.offerKind || "product",
     discountPercent: Math.min(100, Math.max(0, offer.discountPercent || 0)),
     minQuantity: Math.max(1, offer.minQuantity || 1),
+    triggerProductIds: parseIds(offer.triggerProductIds),
   };
 
   if (base.kind === "collection") {

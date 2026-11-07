@@ -16,6 +16,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     db.upsell.deleteMany({ where: { shop } }),
     db.usageCounter.deleteMany({ where: { shop } }),
     db.processedOrder.deleteMany({ where: { shop } }),
+    db.quantityOffer.deleteMany({ where: { shop } }),
+    db.funnelStat.deleteMany({ where: { shop } }),
   ]);
 
   return new Response();

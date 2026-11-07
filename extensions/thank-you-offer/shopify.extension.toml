@@ -1,0 +1,31 @@
+# Thank-you page offer for Easy order COD.
+#
+# Shows the merchant's "X% off your next order" code (a real, once-per-customer
+# Shopify discount the app creates on the Offers page) and, on the Unlimited
+# plan, Shopify's recommended products. The offer is read from an app-owned
+# shop metafield ($app:cod / thankyou) that the app writes when the merchant
+# saves it, so nothing here needs to call the app's server.
+#
+# Merchants place it in the checkout editor: Settings → Checkout → Customize →
+# Thank you page → Add app block → Easy order COD offer.
+#
+# Post-purchase pages aren't used: Shopify doesn't show them for manual
+# payment methods such as Cash on Delivery.
+api_version = "2026-07"
+
+[[extensions]]
+name = "Easy order COD offer"
+handle = "thank-you-offer"
+type = "ui_extension"
+
+[[extensions.targeting]]
+target = "purchase.thank-you.block.render"
+module = "./src/ThankYou.tsx"
+
+# Storefront API access, for product recommendations.
+[extensions.capabilities]
+api_access = true
+
+[[extensions.metafields]]
+namespace = "$app:cod"
+key = "thankyou"

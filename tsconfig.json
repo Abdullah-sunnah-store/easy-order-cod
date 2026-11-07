@@ -1,5 +1,7 @@
 {
   "include": ["env.d.ts", "**/*.ts", "**/*.tsx"],
+  // Checkout UI extensions are Preact projects with their own tsconfig.
+  "exclude": ["node_modules", "build", "extensions/thank-you-offer"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "strict": true,

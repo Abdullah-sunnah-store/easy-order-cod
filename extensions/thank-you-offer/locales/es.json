@@ -1,0 +1,7 @@
+{
+  "offer": "Tienes un {{percent}} % de descuento en tu próximo pedido.",
+  "code": "Tu código: {{code}}",
+  "once": "Se aplica automáticamente desde aquí. Un uso por cliente.",
+  "shop": "Comprar ahora",
+  "recommended": "También te puede gustar"
+}

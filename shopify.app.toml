@@ -62,8 +62,10 @@ api_version = "2026-07"
 [access_scopes]
 # Only what the app actually uses. It does not create orders — Shopify
 # checkout does — but it tags the ones that came from the COD button, which
-# needs write_orders. read_products resolves the add-on offers.
-scopes = "read_orders,write_orders,read_products"
+# needs write_orders. read_products resolves the add-on offers. write_discounts
+# turns quantity offers, bundles and the downsell into real Shopify discounts,
+# so checkout charges exactly the price the form shows.
+scopes = "read_orders,write_orders,read_products,write_discounts"
 
 [auth]
 redirect_urls = [
