@@ -1,4 +1,12 @@
 (function () {
+  // Cash-on-Delivery block.
+  //
+  // The customer picks a quantity and any add-on offers here, and everything
+  // else happens in Shopify checkout: contact details, shipping address,
+  // shipping rate, taxes and payment. Nothing that belongs to checkout is
+  // collected on this page, and no order is created behind Shopify's back —
+  // "Continue to checkout" puts the chosen items in the shop's own cart and
+  // hands the customer to /checkout.
   function initCodForm(root) {
     var overlay = root.querySelector("[data-cod-overlay]");
     var formEl = root.querySelector("[data-cod-form-el]");
@@ -7,23 +15,28 @@
     var messageEl = root.querySelector("[data-cod-message]");
     var qtyInput = root.querySelector("[data-cod-qty]");
     var timerEl = root.querySelector("[data-cod-timer]");
-    var doneEl = root.querySelector("[data-cod-done]");
-    var doneMsgEl = root.querySelector("[data-cod-done-msg]");
-    var okBtn = root.querySelector("[data-cod-ok]");
     if (!formEl || !overlay) return;
 
     // Product data comes from Liquid; everything else arrives from the app.
-    var price = parseInt(root.getAttribute("data-price") || "0", 10) || 0; // cents
     var title = root.getAttribute("data-product-title") || "Product";
     var image = root.getAttribute("data-product-image") || "";
     var moneyFormat = root.getAttribute("data-money-format") || "";
     var currency = ""; // app override; empty = use the shop's money format
-    var codFee = 0; // cents, from the app's Fraud & delivery settings
-    var successMessage =
-      "Thank you! Your order has been placed. We'll call you to confirm.";
-    var buttonLabel = "Order Now (Cash on Delivery)";
+    var buttonLabel = "Continue to checkout";
     var showTotalOnSubmit = true;
     var submitted = false;
+
+    // Every cart route is derived from the theme's own cart URL so a
+    // locale-prefixed storefront (/fr/cart) keeps working.
+    var cartUrl = (root.getAttribute("data-cart-url") || "/cart").replace(/\/+$/, "");
+    var addUrl = cartUrl + "/add.js";
+    var updateUrl = cartUrl + "/update.js";
+    var checkoutUrl = cartUrl.replace(/\/cart$/, "") + "/checkout";
+
+    // Marks the cart so the app can recognise the order Shopify creates from
+    // it — that is how a COD order gets tagged and counted, in an
+    // orders/create webhook, after checkout has done its job.
+    var CART_ATTRIBUTE = "_easy_order_cod";
 
     // Icon paths mirror ICONS in app/routes/app.settings.tsx so the admin
     // preview and the storefront render the same glyph.
@@ -40,7 +53,45 @@
       rounded: "ui-rounded, 'SF Pro Rounded', 'Segoe UI', system-ui, sans-serif"
     };
 
-    // Group digits: 1234567.8 -> "1,234,567.80" with the requested separators.
+    // ---- Which variant is being bought -------------------------------------
+    // Liquid renders the variant that was selected when the page was built, so
+    // it goes stale the moment the customer picks another one. Re-read it from
+    // the theme's own product form (or the ?variant= URL) whenever the modal is
+    // opened or submitted, and price it from the map Liquid embedded.
+    var fallbackVariantId = root.getAttribute("data-variant-id") || "";
+    var priceByVariant = {};
+    (root.getAttribute("data-variants") || "").split(",").forEach(function (pair) {
+      var bits = pair.split(":");
+      if (bits.length === 2) priceByVariant[bits[0].trim()] = parseInt(bits[1], 10) || 0;
+    });
+    var fallbackPrice = parseInt(root.getAttribute("data-price") || "0", 10) || 0; // cents
+
+    // The theme's own product form is the most reliable source, but a page can
+    // hold several (quick-add cards, related products), so look inside this
+    // block's own section before widening the search.
+    var section = root.closest(".shopify-section, section") || document;
+    function themeVariantInput() {
+      var selector = 'form[action*="/cart/add"] [name="id"]:not([disabled])';
+      return section.querySelector(selector) || document.querySelector(selector);
+    }
+
+    function currentVariantId() {
+      var input = themeVariantInput();
+      if (input && input.value) return String(input.value);
+      var fromUrl = new URLSearchParams(window.location.search).get("variant");
+      if (fromUrl) return String(fromUrl);
+      return String(fallbackVariantId);
+    }
+
+    function unitPriceCents() {
+      var id = currentVariantId();
+      return Object.prototype.hasOwnProperty.call(priceByVariant, id)
+        ? priceByVariant[id]
+        : fallbackPrice;
+    }
+
+    // ---- Money -------------------------------------------------------------
+    /** Group digits: 1234567.8 -> "1,234,567.80" with the requested separators. */
     function group(amount, decimals, thousands, decimal) {
       var fixed = Math.abs(amount).toFixed(decimals);
       var parts = fixed.split(".");
@@ -73,7 +124,11 @@
         }
       });
     }
-    // ---- Upsell offers (from the app's Upsells page) ----
+
+    // ---- Add-on offers (from the app's Upsells page) -----------------------
+    // Offers add real products to the cart at the price Shopify holds for them.
+    // The app cannot discount a line it does not own, so no discount is shown
+    // or promised here — checkout is what prices the order.
     var offers = [];
     var offersWrap = overlay.querySelector("[data-cod-offers]");
     var offersList = overlay.querySelector("[data-cod-offers-list]");
@@ -97,9 +152,15 @@
       return null;
     }
 
-    function offerCents(price, discountPercent) {
-      var pct = Math.min(100, Math.max(0, parseFloat(discountPercent) || 0));
-      return Math.round((parseFloat(price) || 0) * (1 - pct / 100) * 100);
+    function itemCents(price) {
+      return Math.round((parseFloat(price) || 0) * 100);
+    }
+
+    // Offer variants arrive as Admin GIDs; the cart wants the numeric id.
+    function numericId(gid) {
+      var s = String(gid || "");
+      var match = s.match(/(\d+)\s*$/);
+      return match ? match[1] : s;
     }
 
     /** The add-on items the customer has ticked, as {variantId, cents}. */
@@ -125,71 +186,35 @@
       return chosenOffers().reduce(function (sum, o) { return sum + o.cents; }, 0);
     }
 
-    // Quantity offers discount the product being bought rather than adding one.
-    function quantityDiscountPercent() {
-      var q = qty();
-      var best = 0;
-      for (var i = 0; i < offers.length; i++) {
-        var o = offers[i];
-        if (o.type === "quantity" && q >= (o.minQuantity || 1)) {
-          best = Math.max(best, parseFloat(o.discountPercent) || 0);
-        }
-      }
-      return best;
-    }
-
-    function mainItemCents() {
-      var pct = quantityDiscountPercent();
-      return Math.round(price * qty() * (1 - pct / 100));
-    }
-
-    function subtotalCents() {
-      return mainItemCents() + offersCents();
-    }
-    // Free shipping is decided by the order subtotal, so it has to be re-checked
-    // whenever the quantity changes — not once at render time.
-    function freeShipping() {
-      var t = Math.round((parseFloat(shipCfg.freeShippingThreshold) || 0) * 100);
-      return t > 0 && subtotalCents() >= t;
-    }
-    function shippingCents() {
-      if (freeShipping()) return 0;
-      var sel = overlay.querySelector('input[name="ship"]:checked');
-      return sel ? parseInt(sel.getAttribute("data-ship-price") || "0", 10) || 0 : 0;
-    }
     function qty() {
       return Math.max(1, parseInt((qtyInput && qtyInput.value) || "1", 10) || 1);
     }
 
+    function itemsSubtotalCents() {
+      return unitPriceCents() * qty() + offersCents();
+    }
+
+    // ---- Summary -----------------------------------------------------------
+    // Only the items are totalled. Shipping, taxes, discounts and any COD fee
+    // belong to checkout, and quoting them here would be guessing at numbers
+    // Shopify has not calculated yet.
     function renderSummary() {
-      var sub = subtotalCents();
-      var ship = shippingCents();
-      var total = sub + ship + codFee;
+      var sub = itemsSubtotalCents();
       var rows = "";
       rows += '<div class="cod__product">' +
         (image ? '<img src="' + image + '" alt="" />' : "") +
-        "<span>" + title + "</span></div>";
-      // Each accepted offer gets its own line so the customer can see what the
-      // extra charge is for.
+        "<span>" + escapeHtml(title) + " × " + qty() + "</span></div>";
       chosenOffers().forEach(function (c) {
         var item = offerItemById(c.offerId, c.variantId);
         rows += '<div class="cod__line cod__line--add"><span>+ ' +
           escapeHtml(item ? item.title : "Added item") +
           "</span><b>" + money(c.cents) + "</b></div>";
       });
-      var qPct = quantityDiscountPercent();
-      if (qPct > 0) {
-        rows += '<div class="cod__line cod__line--save"><span>Quantity discount (' +
-          qPct + "%)</span><b>-" + money(Math.round(price * qty() * qPct / 100)) + "</b></div>";
-      }
-      rows += '<div class="cod__line"><span>Subtotal</span><b>' + money(sub) + "</b></div>";
-      rows += '<div class="cod__line"><span>Shipping</span><b>' +
-        (freeShipping() ? "FREE" : money(ship)) + "</b></div>";
-      if (codFee > 0) rows += '<div class="cod__line"><span>COD fee</span><b>' + money(codFee) + "</b></div>";
-      rows += '<div class="cod__line cod__total"><span>Total</span><b>' + money(total) + "</b></div>";
+      rows += '<div class="cod__line cod__total"><span>Items subtotal</span><b>' +
+        money(sub) + "</b></div>";
       summaryEl.innerHTML = rows;
       submitBtn.textContent = showTotalOnSubmit
-        ? buttonLabel + " — " + money(total)
+        ? buttonLabel + " — " + money(sub)
         : buttonLabel;
     }
 
@@ -205,25 +230,14 @@
     var overlayHome = overlay.parentNode;
     document.body.appendChild(overlay);
 
-    // Show the success confirmation panel (hides the form).
-    function showDone(msg) {
-      if (doneMsgEl) doneMsgEl.textContent = msg;
-      formEl.style.display = "none";
-      if (doneEl) doneEl.hidden = false;
-    }
-    // Back to a fresh form (used on OK and when reopening).
+    // Back to a ready state (used when the modal is opened, and after a failed
+    // add-to-cart so the customer can try again).
     function resetToForm() {
-      if (doneEl) doneEl.hidden = true;
-      formEl.style.display = "";
       submitted = false;
       submitBtn.disabled = false;
       messageEl.hidden = true;
-      // The form was reset, so the city is empty again — re-resolve the rates
-      // before redrawing the totals.
-      refreshShipping();
       renderSummary();
     }
-    if (okBtn) okBtn.addEventListener("click", function () { resetToForm(); close(); });
 
     // Modal open/close via a class (not the [hidden] attr, which our own CSS
     // would override).
@@ -255,163 +269,15 @@
       tick();
     }
 
-    // Build the shipping choices from the app settings. Prices arrive in the
-    // shop's major currency unit (e.g. 80 = ৳80) and are stored as cents here.
-    //
-    // Rate resolution mirrors app/lib/shipping.ts so the price can follow the
-    // city the customer types without a round-trip. Keep the two in step.
-    var shipWrap = overlay.querySelector("[data-cod-ship]");
-    var shipList = overlay.querySelector("[data-cod-ship-list]");
-    var cityInput = formEl.querySelector('[name="city"]');
-    var shipCfg = {
-      mode: "manual",
-      manual: [],
-      synced: [],
-      hiddenRates: [],
-      rulesEnabled: false,
-      rules: [],
-      fallbackPrice: 0,
-      fallbackLabel: "Delivery charge",
-      freeShippingThreshold: 0
-    };
-
-    function normalizeCity(value) {
-      return String(value == null ? "" : value)
-        .toLowerCase()
-        .replace(/[^0-9a-zÀ-￿]+/gi, " ")
-        .trim();
-    }
-
-    function ruleMatchesCity(rule, city) {
-      var typed = normalizeCity(city);
-      if (!typed) return false;
-      return String((rule && rule.cities) || "")
-        .split(",")
-        .map(normalizeCity)
-        .filter(Boolean)
-        .some(function (name) {
-          return typed.indexOf(name) >= 0 || name.indexOf(typed) >= 0;
-        });
-    }
-
-    // Synced rates the merchant switched off in the app never reach the form.
-    function isRateHidden(name) {
-      var key = String(name || "").trim().toLowerCase();
-      return (shipCfg.hiddenRates || []).some(function (h) {
-        return String(h || "").trim().toLowerCase() === key;
-      });
-    }
-
-    function cleanOptions(list) {
-      return (list || []).filter(function (o) {
-        return o && String(o.name || "").trim() !== "";
-      }).map(function (o) {
-        return { name: String(o.name).trim(), price: parseFloat(o.price) || 0 };
-      });
-    }
-
-    // The rates to show for a given city, in display order: the dynamic rate
-    // first (it is the one that tracks what they typed), then the manual and/or
-    // synced rates, deduped by name.
-    function optionsForCity(city) {
-      var out = [];
-      if (shipCfg.rulesEnabled) {
-        var hit = null;
-        for (var i = 0; i < (shipCfg.rules || []).length; i++) {
-          if (ruleMatchesCity(shipCfg.rules[i], city)) { hit = shipCfg.rules[i]; break; }
-        }
-        out.push(
-          hit
-            ? { name: String(hit.label || "").trim() || shipCfg.fallbackLabel, price: parseFloat(hit.price) || 0 }
-            : { name: shipCfg.fallbackLabel, price: parseFloat(shipCfg.fallbackPrice) || 0 }
-        );
-      }
-      if (shipCfg.mode === "manual" || shipCfg.mode === "both") {
-        out = out.concat(cleanOptions(shipCfg.manual));
-      }
-      if (shipCfg.mode === "auto" || shipCfg.mode === "both") {
-        out = out.concat(cleanOptions(shipCfg.synced).filter(function (o) {
-          return !isRateHidden(o.name);
-        }));
-      }
-      var seen = {};
-      return out.filter(function (o) {
-        var key = o.name.toLowerCase();
-        if (seen[key]) return false;
-        seen[key] = true;
-        return true;
-      });
-    }
-
-    function renderShipping(options) {
-      if (!shipWrap || !shipList) return;
-      // Keep the customer's pick across a city-driven re-render.
-      var previous = overlay.querySelector('input[name="ship"]:checked');
-      var previousValue = previous ? previous.value : null;
-      shipList.textContent = "";
-      var valid = cleanOptions(options);
-      if (valid.length === 0) {
-        shipWrap.hidden = true;
-        return;
-      }
-      shipWrap.hidden = false;
-      var free = freeShipping();
-      var matched = false;
-      valid.forEach(function (opt, i) {
-        var cents = Math.round(opt.price * 100);
-        var label = document.createElement("label");
-        label.className = "cod__ship-opt";
-
-        var left = document.createElement("span");
-        var radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = "ship";
-        radio.value = opt.name;
-        radio.setAttribute("data-ship-price", String(cents));
-        if (previousValue === opt.name) { radio.checked = true; matched = true; }
-        left.appendChild(radio);
-        left.appendChild(document.createTextNode(" " + opt.name));
-
-        var right = document.createElement("b");
-        right.textContent = free ? "FREE" : money(cents);
-
-        label.appendChild(left);
-        label.appendChild(right);
-        shipList.appendChild(label);
-      });
-      // Nothing carried over (first paint, or the old pick disappeared) — the
-      // first rate is the dynamic one when city rules are on, so preselect it.
-      if (!matched) {
-        var first = shipList.querySelector('input[name="ship"]');
-        if (first) first.checked = true;
-      }
-    }
-
-    // Re-price as the city is typed. Only re-renders when the resolved rates
-    // actually change, so typing doesn't reset the radio on every keystroke.
-    var lastRateKey = "";
-    function refreshShipping() {
-      var opts = optionsForCity(cityInput ? cityInput.value : "");
-      var key = JSON.stringify(opts) + "|" + (freeShipping() ? "free" : "paid");
-      if (key === lastRateKey) return;
-      lastRateKey = key;
-      renderShipping(opts);
-    }
-
     // Build the offer rows. A product offer is a single tickable item; a
     // collection offer is a tick plus a <select> of the products in it.
-    // Quantity offers add nothing — they discount the item being bought — so
-    // they show as a note instead of a checkbox.
     function renderOffers() {
       if (!offersWrap || !offersList) return;
       offersList.textContent = "";
       var addable = offers.filter(function (o) {
         return o.type !== "quantity" && (o.items || []).length > 0;
       });
-      var quantityOffers = offers.filter(function (o) {
-        return o.type === "quantity" && (o.minQuantity || 1) > 1;
-      });
-      if (addable.length === 0 && quantityOffers.length === 0) {
+      if (addable.length === 0) {
         offersWrap.hidden = true;
         return;
       }
@@ -441,7 +307,7 @@
           pick.setAttribute("data-cod-offer-pick", offer.id);
           offer.items.forEach(function (item) {
             var opt = document.createElement("option");
-            var cents = offerCents(item.price, offer.discountPercent);
+            var cents = itemCents(item.price);
             opt.value = item.variantId;
             opt.setAttribute("data-cents", String(cents));
             opt.textContent = item.title + " — " + money(cents);
@@ -452,7 +318,7 @@
           body.appendChild(pick);
         } else {
           box.setAttribute("data-variant", first.variantId);
-          box.setAttribute("data-cents", String(offerCents(first.price, offer.discountPercent)));
+          box.setAttribute("data-cents", String(itemCents(first.price)));
           var line = document.createElement("span");
           line.className = "cod__offer-line";
           if (first.image) {
@@ -469,123 +335,29 @@
 
         var priceEl = document.createElement("b");
         priceEl.className = "cod__offer-price";
-        var full = Math.round((parseFloat(first.price) || 0) * 100);
-        var now = offerCents(first.price, offer.discountPercent);
-        if (offer.discountPercent > 0) {
-          var was = document.createElement("s");
-          was.textContent = money(full);
-          priceEl.appendChild(was);
-          priceEl.appendChild(document.createTextNode(" "));
-        }
-        priceEl.appendChild(document.createTextNode(money(now)));
+        priceEl.textContent = money(itemCents(first.price));
 
         row.appendChild(box);
         row.appendChild(body);
         row.appendChild(priceEl);
         offersList.appendChild(row);
       });
-
-      // "Buy 3+ and save 10%" — a nudge, applied automatically by the summary.
-      quantityOffers.forEach(function (offer) {
-        var note = document.createElement("div");
-        note.className = "cod__offer-note";
-        note.textContent =
-          "Buy " + offer.minQuantity + "+ and save " + offer.discountPercent + "%";
-        offersList.appendChild(note);
-      });
     }
 
-    // Country dial codes beside the phone field. Hidden until the app sends a
-    // list, so the form degrades to a plain phone input if settings fail.
-    var dialEl = overlay.querySelector("[data-cod-dial]");
-    function renderDialCodes(codes) {
-      if (!dialEl) return;
-      var list = (codes || []).filter(function (c) {
-        return c && String(c).trim() !== "";
-      });
-      if (list.length === 0) {
-        dialEl.hidden = true;
-        return;
-      }
-      dialEl.textContent = "";
-      list.forEach(function (code) {
-        var opt = document.createElement("option");
-        opt.value = String(code).trim();
-        opt.textContent = String(code).trim();
-        dialEl.appendChild(opt);
-      });
-      dialEl.hidden = false;
-    }
-
-    // "01709504746" + "+880" -> "+8801709504746". Leading zeros are a local
-    // prefix and must go, or the number is invalid once a country code is on it.
-    function fullPhone() {
-      var el = formEl.querySelector('[name="phone"]');
-      var typed = el ? (el.value || "").trim() : "";
-      if (!dialEl || dialEl.hidden || !dialEl.value) return typed;
-      if (typed.charAt(0) === "+") return typed;
-      var digits = typed.replace(/\D/g, "").replace(/^0+/, "");
-      return digits ? dialEl.value + digits : "";
-    }
-
-    // Apply merchant settings from the app (field visibility, texts)
+    // Apply merchant settings from the app (texts, appearance, offers).
     fetch("/apps/cod/settings", { headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (cfg) {
         if (!cfg) return;
         if (cfg.enabled === false) { root.hidden = true; return; }
-        if (cfg.successMessage) successMessage = cfg.successMessage;
         var headingEl = overlay.querySelector(".cod__head span");
         if (headingEl && cfg.headingText) headingEl.textContent = cfg.headingText;
 
-        // Storefront values that used to live in the theme block's schema.
         if (cfg.currencySymbol) currency = cfg.currencySymbol;
-        codFee = Math.round((parseFloat(cfg.codFee) || 0) * 100);
         countdownMinutes = parseInt(cfg.countdownMinutes, 10) || 0;
-        // cfg.shipping carries the mode, the city rules and the free-shipping
-        // threshold; cfg.shippingOptions is the already-resolved list kept for
-        // older payloads that predate it.
-        if (cfg.shipping) {
-          shipCfg.mode = cfg.shipping.mode || "manual";
-          shipCfg.manual = cfg.shipping.manual || [];
-          shipCfg.synced = cfg.shipping.synced || [];
-          shipCfg.hiddenRates = cfg.shipping.hiddenRates || [];
-          shipCfg.rulesEnabled = cfg.shipping.rulesEnabled === true;
-          shipCfg.rules = cfg.shipping.rules || [];
-          shipCfg.fallbackPrice = parseFloat(cfg.shipping.fallbackPrice) || 0;
-          shipCfg.fallbackLabel =
-            String(cfg.shipping.fallbackLabel || "").trim() || "Delivery charge";
-          shipCfg.freeShippingThreshold =
-            parseFloat(cfg.shipping.freeShippingThreshold) || 0;
-          refreshShipping();
-        } else {
-          shipCfg.manual = cfg.shippingOptions || [];
-          refreshShipping();
-        }
         offers = cfg.upsells || [];
         renderOffers();
-        renderDialCodes(cfg.dialCodes);
-        if (cfg.fields) {
-          ["name", "phone", "email", "address", "city", "quantity", "notes"].forEach(function (name) {
-            var f = overlay.querySelector('[data-cod-field="' + name + '"]');
-            if (!f) return;
-            var off = cfg.fields[name] === false;
-            f.hidden = off;
-            // A hidden input that is still `required` blocks native submit with
-            // an unfocusable validation bubble — drop the flag while hidden.
-            var inputs = f.querySelectorAll("input");
-            for (var i = 0; i < inputs.length; i++) {
-              if (off) {
-                if (inputs[i].required) {
-                  inputs[i].setAttribute("data-cod-was-required", "1");
-                  inputs[i].required = false;
-                }
-              } else if (inputs[i].getAttribute("data-cod-was-required")) {
-                inputs[i].required = true;
-              }
-            }
-          });
-        }
+
         // Apply the Form Builder appearance (colors, radius, sizes).
         var bc = cfg.builder;
         if (bc) {
@@ -638,7 +410,6 @@
             overlay.classList.toggle(cls, !!on);
           };
           toggle("cod--stacked", bc.fieldLayout === "stacked");
-          toggle("cod--no-req", bc.showRequiredMarks === false);
           toggle("cod--no-img", bc.showProductImage === false);
           toggle("cod--btn-normal", bc.buttonBold === false);
           toggle("cod--btn-auto", bc.buttonFullWidth === false);
@@ -686,11 +457,11 @@
             openBtn.appendChild(label);
           }
 
-          // Submit button label + whether the total is appended to it.
+          // Continue button label + whether the items subtotal is appended.
           if (bc.submitText) buttonLabel = bc.submitText;
           if (bc.submitShowTotal === false) showTotalOnSubmit = false;
 
-          // Trust badge under the submit button.
+          // Trust badge under the continue button.
           if (bc.trustBadge) {
             var badge = overlay.querySelector("[data-cod-trust]");
             if (!badge) {
@@ -703,88 +474,76 @@
           }
         }
 
-        // Settings arrive after the first paint — repaint the summary so the
-        // fee, currency, shipping and submit label all take effect. Runs even
-        // when no builder config exists, since those values come from cfg too.
+        // Settings arrive after the first paint — repaint so the currency and
+        // the button label take effect.
         renderSummary();
       })
       .catch(function () {});
 
-    // The city drives the dynamic rate and the quantity drives free shipping,
-    // so both have to re-resolve the rates before the summary is redrawn.
-    function onFormChange() {
-      refreshShipping();
-      renderSummary();
-    }
-    formEl.addEventListener("change", onFormChange);
-    formEl.addEventListener("input", onFormChange);
+    formEl.addEventListener("change", renderSummary);
+    formEl.addEventListener("input", renderSummary);
     renderSummary();
 
+    // ---- Continue to checkout ---------------------------------------------
     formEl.addEventListener("submit", function (e) {
       e.preventDefault();
       if (submitted) return;
 
-      // The phone field can be switched off in the Form builder, so it may be
-      // absent or hidden — only enforce it when it's actually shown.
-      var phoneEl = formEl.querySelector('[name="phone"]');
-      var phoneRow = formEl.querySelector('[data-cod-field="phone"]');
-      var phoneShown = phoneEl && !(phoneRow && phoneRow.hidden);
-      var phone = phoneEl ? (phoneEl.value || "").trim() : "";
-      if (phoneShown && !phone) { showMessage("Please enter your phone number.", "error"); return; }
+      var variantId = currentVariantId();
+      if (!variantId) {
+        showMessage("Please choose a product option first.", "error");
+        return;
+      }
 
       submitted = true;
       submitBtn.disabled = true;
-      submitBtn.textContent = "Placing order…";
+      submitBtn.textContent = "Taking you to checkout…";
       messageEl.hidden = true;
 
-      var sel = overlay.querySelector('input[name="ship"]:checked');
-      var payload = new FormData(formEl);
-      // Send the dial code merged in, not the raw local number.
-      payload.set("phone", fullPhone());
-      payload.append("variantId", root.getAttribute("data-variant-id") || "");
-      payload.append("shippingTitle", sel ? sel.value : "");
-      payload.append("shippingPrice", String((shippingCents() / 100).toFixed(2)));
-      payload.append("codFee", String((codFee / 100).toFixed(2)));
-      // Only the offer and variant ids travel — the server re-resolves the
-      // offer and prices it itself, so these can't be used to discount an order.
-      payload.append(
-        "upsells",
-        JSON.stringify(chosenOffers().map(function (c) {
-          return { offerId: c.offerId, variantId: c.variantId };
-        })),
-      );
+      var items = [{ id: Number(numericId(variantId)), quantity: qty() }];
+      chosenOffers().forEach(function (c) {
+        items.push({ id: Number(numericId(c.variantId)), quantity: 1 });
+      });
 
-      // Guard against the dev tunnel dropping a slow response after the order
-      // is already created: on timeout/parse failure we do NOT re-enable the
-      // button (avoids duplicate COD orders) and show a soft message instead.
-      var timedOut = false;
-      var timer = setTimeout(function () {
-        timedOut = true;
-        showMessage("Your order is being placed. If you don't get a confirmation call, please contact us before ordering again.", "info");
-      }, 12000);
+      var attributes = {};
+      attributes[CART_ATTRIBUTE] = "1";
 
-      fetch("/apps/cod/order", { method: "POST", body: payload })
-        .then(function (r) { return r.text().then(function (t) { return { ok: r.ok, t: t }; }); })
-        .then(function (res) {
-          clearTimeout(timer);
-          if (timedOut) return;
-          var data = null;
-          try { data = JSON.parse(res.t); } catch (e) {}
-          if (res.ok && data && data.ok) {
-            formEl.reset();
-            showDone(data.message || successMessage);
-          } else if (data && data.error) {
-            submitted = false; submitBtn.disabled = false; renderSummary();
-            showMessage(data.error, "error");
-          } else {
-            // Response arrived but wasn't parseable — the order may still exist.
-            showMessage("Your order may have been placed. Please check before ordering again.", "info");
-          }
+      fetch(addUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ items: items })
+      })
+        .then(function (r) {
+          if (r.ok) return r.json();
+          // Shopify answers 422 with a readable reason — out of stock, or a
+          // variant the customer can't buy. Show it rather than a generic error.
+          return r.json().then(
+            function (d) { throw new Error((d && d.description) || (d && d.message) || ""); },
+            function () { throw new Error(""); }
+          );
         })
-        .catch(function () {
-          clearTimeout(timer);
-          if (timedOut) return;
-          showMessage("Your order may have been placed. Please check before ordering again — don't reorder if you get a confirmation call.", "info");
+        // Tags the cart so the app can recognise the resulting order. A failure
+        // here only costs the tag, so it must not block the sale.
+        .then(function () {
+          return fetch(updateUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ attributes: attributes })
+          }).catch(function () {});
+        })
+        .then(function () {
+          window.location.href = checkoutUrl;
+        })
+        .catch(function (err) {
+          submitted = false;
+          submitBtn.disabled = false;
+          renderSummary();
+          showMessage(
+            err && err.message
+              ? err.message
+              : "We couldn't start your checkout. Please try again.",
+            "error"
+          );
         });
     });
   }

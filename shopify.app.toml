@@ -13,8 +13,8 @@ handle = "easy-order-cod"
 # it runs. Release from shopify.app.production.toml instead — see that file.
 automatically_update_urls_on_dev = true
 
-# The storefront form calls /apps/cod/settings and /apps/cod/order through this
-# proxy. Without it those paths 404 and no COD order can ever be created.
+# The storefront block reads its wording, appearance and add-on offers from
+# /apps/cod/settings through this proxy. Without it the block renders bare.
 [app_proxy]
 url = "https://easy-order-cod.vercel.app/proxy"
 subpath = "cod"
@@ -22,6 +22,13 @@ prefix = "apps"
 
 [webhooks]
 api_version = "2026-07"
+
+# These stay RELATIVE, unlike the release config, because `shopify app dev`
+# rewrites application_url to the tunnel root - which has no path - so a
+# relative uri resolves correctly there. Never deploy this file: outside a dev
+# session application_url is ".../app", and the CLI would concatenate these
+# into /app/webhooks/..., which the app answers with a 404. See the same block
+# in shopify.app.production.toml.
 
   # App lifecycle
   [[webhooks.subscriptions]]
@@ -31,6 +38,13 @@ api_version = "2026-07"
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+
+  # Recognises the orders Shopify checkout creates from the COD button, so the
+  # app can tag them and count them against the plan. The app does not create
+  # orders itself.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
 
   # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
   [[webhooks.subscriptions]]
@@ -46,9 +60,10 @@ api_version = "2026-07"
   uri = "/webhooks/shop/redact"
 
 [access_scopes]
-# Only what the COD app actually uses: create orders, read orders/products, and
-# read the shop's shipping zones for the Form builder's auto-synced rates.
-scopes = "read_orders,write_orders,read_products,read_shipping"
+# Only what the app actually uses. It does not create orders — Shopify
+# checkout does — but it tags the ones that came from the COD button, which
+# needs write_orders. read_products resolves the add-on offers.
+scopes = "read_orders,write_orders,read_products"
 
 [auth]
 redirect_urls = [

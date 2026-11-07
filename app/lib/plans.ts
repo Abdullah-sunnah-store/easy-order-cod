@@ -13,7 +13,8 @@ export type PlanName = "Free" | "Basic" | "Advanced";
 export const PLAN_ORDER: PlanName[] = [FREE_PLAN, PLANS.BASIC, PLANS.ADVANCED];
 
 // -1 means unlimited. Numbers are the single source of truth: the Plans page
-// renders these, and proxy.order.tsx enforces them.
+// renders these, and proxy.settings.tsx enforces them by withholding the
+// storefront button once the allowance is used up.
 export const PLAN_LIMITS: Record<PlanName, { orders: number; upsells: number }> = {
   Free: { orders: 60, upsells: 1 },
   Basic: { orders: 550, upsells: -1 },

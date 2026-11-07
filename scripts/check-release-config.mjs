@@ -107,7 +107,7 @@ if (appUrl) origin = originOf(appUrl, "application_url");
 const proxyUrl = get("app_proxy", "url");
 if (!proxyUrl) {
   fail(
-    "[app_proxy] url is missing - /apps/cod/settings and /apps/cod/order would 404 and no COD order could be created.",
+    "[app_proxy] url is missing - /apps/cod/settings would 404 and the storefront block would render bare.",
   );
 } else {
   const o = originOf(proxyUrl, "[app_proxy] url");
@@ -137,6 +137,55 @@ for (const r of redirects) {
         ") does not match application_url origin (" +
         origin +
         ").",
+    );
+  }
+}
+
+// --- Webhook endpoints -----------------------------------------------------
+// The CLI builds a webhook endpoint by CONCATENATING a relative uri onto
+// application_url rather than resolving it as a URL. application_url here ends
+// in /app, so `uri = "/webhooks/app/uninstalled"` shipped as
+// ".../app/webhooks/app/uninstalled" - a 404. That failed the "Verifies
+// webhooks with HMAC signatures" review check (Shopify saw a 404 where a
+// signed 401 belongs) and silently stopped app/uninstalled from ever firing.
+//
+// Resolve each uri exactly the way the CLI does, and insist on the result
+// living on the app origin.
+const webhookUris = [...toml.matchAll(/^\s*uri\s*=\s*"([^"]+)"/gm)]
+  .map((m) => m[1])
+  .filter((u) => u.includes("/webhooks/"));
+
+if (webhookUris.length === 0) {
+  fail("No [[webhooks.subscriptions]] uri entries found - the mandatory compliance webhooks are missing.");
+}
+
+const resolvedWebhooks = [];
+for (const uri of webhookUris) {
+  // Concatenation, not new URL(): this must mirror the CLI's behaviour, bug
+  // and all, or the check tests a URL Shopify never registers.
+  const resolved = uri.startsWith("http") ? uri : (appUrl ?? "") + uri;
+  resolvedWebhooks.push(resolved);
+  const o = originOf(resolved, "webhook uri " + uri);
+  if (o && origin && o !== origin) {
+    fail(
+      "webhook uri " + uri + " resolves to " + resolved +
+        ", which is not on the app origin (" + origin + ").",
+    );
+    continue;
+  }
+  let path;
+  try {
+    path = new URL(resolved).pathname;
+  } catch {
+    continue;
+  }
+  if (!path.startsWith("/webhooks/")) {
+    fail(
+      "webhook uri " + uri + " resolves to " + resolved + ". The app serves " +
+        "webhooks at /webhooks/*, so Shopify would get a 404 instead of a " +
+        "signed 401 - which fails the HMAC review check and stops the webhook " +
+        "firing. Write the uri as an absolute https URL: " +
+        origin + path.replace(/^.*(\/webhooks\/)/, "$1"),
     );
   }
 }
@@ -250,6 +299,48 @@ if (!skipLive && origin && failures.length === 0) {
         why +
         '). If DNS cannot resolve the hostname, the reviewer sees "server IP address could not be found" - the exact failure this app was rejected for.',
     );
+  }
+}
+
+// Shopify's "Verifies webhooks with HMAC signatures" review check posts an
+// invalidly-signed delivery to the registered compliance endpoints and expects
+// 401. Ask the deployed app the same question, at the same URL Shopify will.
+if (!skipLive && failures.length === 0) {
+  const target = resolvedWebhooks.find((u) => u.includes("/customers/data_request"));
+  if (target) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 30000);
+      const res = await fetch(target, {
+        method: "POST",
+        signal: ctrl.signal,
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Topic": "customers/data_request",
+          "X-Shopify-Shop-Domain": "release-preflight.myshopify.com",
+          "X-Shopify-Hmac-Sha256": "cHJlZmxpZ2h0LWludmFsaWQtc2lnbmF0dXJl",
+        },
+        body: JSON.stringify({ shop_domain: "release-preflight.myshopify.com" }),
+      });
+      clearTimeout(timer);
+      if (res.status === 401) {
+        notes.push(target + " rejects an invalid HMAC with 401");
+      } else {
+        fail(
+          target + " answered " + res.status + " to an invalidly-signed " +
+            "webhook, expected 401. This is exactly what the App Store's " +
+            '"Verifies webhooks with HMAC signatures" check tests. A 404 means ' +
+            "the uri resolves to a path the app does not serve; anything else " +
+            "means the handler is not rejecting bad signatures.",
+        );
+      }
+    } catch (err) {
+      fail(
+        target + " is unreachable (" + ((err && err.message) || String(err)) +
+          "), so Shopify's HMAC check cannot pass either.",
+      );
+    }
   }
 }
 

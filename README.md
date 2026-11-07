@@ -1,6 +1,6 @@
 # Easy order COD
 
-Cash-on-delivery order forms for Shopify storefronts.
+A cash-on-delivery buy button for Shopify storefronts.
 
 **Hosting, releasing and App Store resubmission: see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).**
 Read it before running `shopify app deploy` - the app has already been rejected
@@ -17,6 +17,41 @@ Quick reference:
 
 Storage is Postgres (Neon) in every environment, defined in `prisma/schema.prisma`.
 Copy `.env.example` to `.env` and point `DATABASE_URL` at a Neon dev branch.
+
+## How an order is placed
+
+Every order goes through Shopify checkout. The app never creates one.
+
+1. The theme app extension (`extensions/cod-form`) renders a branded
+   cash-on-delivery button on the product page. Opening it shows a quantity
+   field, the merchant's add-on offers, a countdown and an items subtotal.
+2. "Continue to checkout" posts the chosen variant and any ticked offers to the
+   shop's own cart (`/cart/add.js`), stamps the cart with the
+   `_easy_order_cod` attribute (`/cart/update.js`), and sends the customer to
+   `/checkout`.
+3. Shopify checkout collects the contact details, shipping address, shipping
+   rate and payment. Merchants offer cash on delivery by enabling the manual
+   **Cash on Delivery (COD)** payment method in Settings → Payments.
+4. `orders/create` fires. `app/routes/webhooks.orders.create.tsx` looks for the
+   cart attribute and, when it's there, adds the merchant's order tag and
+   counts the order against the shop's monthly plan allowance. Nothing from the
+   payload is stored.
+
+**What the app must never do**, per App Store requirement 1.1.2 (use Shopify
+checkout):
+
+- collect a name, email, phone number or shipping address on the storefront —
+  those belong to checkout, and asking for them there is what got this app
+  rejected;
+- call `orderCreate`, or otherwise register a transaction through the Admin API
+  in place of a checkout;
+- quote a shipping rate, tax or cash-on-delivery fee that Shopify has not
+  calculated, or show a discounted price checkout will not honour.
+
+Shipping rates, COD surcharges and discounts are configured in Shopify itself.
+The app's Prisma schema still carries the columns from the pre-checkout design
+(`shippingOptions`, `codFee`, `showPhone`, …); they are no longer read by
+anything and are kept only so the data isn't destroyed.
 
 ---
 

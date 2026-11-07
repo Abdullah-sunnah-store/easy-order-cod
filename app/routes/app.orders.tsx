@@ -109,8 +109,9 @@ export default function OrdersPage() {
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
                 <p>
-                  Orders placed through the storefront COD form (tagged{" "}
-                  <b>{tag}</b>) will appear here.
+                  Orders that started from the storefront COD button are
+                  tagged <b>{tag}</b> once Shopify checkout creates them, and
+                  appear here.
                 </p>
               </EmptyState>
             ) : (
@@ -147,8 +148,8 @@ export default function OrdersPage() {
                       <IndexTable.Cell>
                         {new Date(o.createdAt).toLocaleDateString()}
                       </IndexTable.Cell>
-                      {/* Fall back to the order's own contact fields: Shopify
-                          keeps those even when it discards the address. */}
+                      {/* A guest checkout can leave the shipping address name
+                          blank, so fall back to the order's contact fields. */}
                       <IndexTable.Cell>
                         {o.shippingAddress?.name || o.email || "—"}
                       </IndexTable.Cell>

@@ -25,8 +25,8 @@ handle = "easy-order-cod"
 [build]
 automatically_update_urls_on_dev = false
 
-# The storefront form calls /apps/cod/settings and /apps/cod/order through this
-# proxy. Without it those paths 404 and no COD order can ever be created.
+# The storefront block reads its wording, appearance and add-on offers from
+# /apps/cod/settings through this proxy. Without it the block renders bare.
 [app_proxy]
 url = "https://easy-order-cod.vercel.app/proxy"
 subpath = "cod"
@@ -35,32 +35,52 @@ prefix = "apps"
 [webhooks]
 api_version = "2026-07"
 
+# Every uri below is ABSOLUTE, and must stay that way.
+#
+# The CLI turns a relative uri into an endpoint by concatenating it onto
+# application_url. application_url is "https://easy-order-cod.vercel.app/app",
+# so uri = "/webhooks/app/uninstalled" registered as
+# ".../app/webhooks/app/uninstalled" - a path the app does not serve. Shopify
+# got a 404 instead of a signed 401, which failed the "Verifies webhooks with
+# HMAC signatures" automated check, and app/uninstalled never fired at all.
+#
+# `npm run check:release` now resolves these the same way the CLI does and
+# probes one of them, so this cannot ship again.
+
   # App lifecycle
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
+  uri = "https://easy-order-cod.vercel.app/webhooks/app/uninstalled"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
+  uri = "https://easy-order-cod.vercel.app/webhooks/app/scopes_update"
+
+  # Recognises the orders Shopify checkout creates from the COD button, so the
+  # app can tag them and count them against the plan. The app does not create
+  # orders itself.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "https://easy-order-cod.vercel.app/webhooks/orders/create"
 
   # Mandatory GDPR / privacy compliance webhooks (required for App Store apps)
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
-  uri = "/webhooks/customers/data_request"
+  uri = "https://easy-order-cod.vercel.app/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/redact" ]
-  uri = "/webhooks/customers/redact"
+  uri = "https://easy-order-cod.vercel.app/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "shop/redact" ]
-  uri = "/webhooks/shop/redact"
+  uri = "https://easy-order-cod.vercel.app/webhooks/shop/redact"
 
 [access_scopes]
-# Only what the COD app actually uses: create orders, read orders/products, and
-# read the shop's shipping zones for the Form builder's auto-synced rates.
-scopes = "read_orders,write_orders,read_products,read_shipping"
+# Only what the app actually uses. It does not create orders — Shopify
+# checkout does — but it tags the ones that came from the COD button, which
+# needs write_orders. read_products resolves the add-on offers.
+scopes = "read_orders,write_orders,read_products"
 
 [auth]
 redirect_urls = [

@@ -30,6 +30,90 @@ reasons that the rules below now prevent:
   the module was still loading — which takes down every route, `/healthz`
   included.
 
+## The second rejection: requirement 1.1.2 (use Shopify checkout)
+
+The app was rejected again, this time on a core requirement rather than a
+hosting fault. The reviewer's finding:
+
+> the theme app extension form of the application is requesting Information
+> that should be filled out through Shopify checkout page
+
+The storefront block collected a name, phone, email, address and city, let the
+customer choose a shipping rate, and posted all of it to `/apps/cod/order`,
+which called Admin `orderCreate`. That is both halves of what 1.1.2 forbids:
+checkout-owned data collected offsite, and a transaction registered through the
+API in connection with it.
+
+The flow was rebuilt around Shopify checkout — see **How an order is placed** in
+the README. What changed:
+
+| Removed | Replaced by |
+| --- | --- |
+| Name, phone, email, address, city, notes fields | Shopify checkout |
+| Shipping rate picker, city rules, rate sync (`read_shipping`) | Shopify checkout's own rates |
+| COD fee and free-shipping lines on the form | Settings → Shipping and delivery |
+| Offer discount percentages | Shopify → Discounts |
+| `proxy.order.tsx` → Admin `orderCreate` | `/cart/add.js` → `/checkout` |
+| Order counting at creation time | `orders/create` webhook |
+
+### What must be true before resubmitting
+
+1. **Scopes changed.** `read_shipping` is gone. Update `SCOPES` in Vercel →
+   Settings → Environment Variables to `read_orders,write_orders,read_products`
+   and redeploy, or the value the app boots with will not match the config it
+   released. Installed shops are re-prompted through `app/scopes_update`.
+2. **A new webhook subscription** (`orders/create`) ships with the release. It
+   needs the protected customer data approval the app already holds.
+3. **The test store needs cash on delivery enabled**: Settings → Payments →
+   Manual payment methods → **Cash on Delivery (COD)**. Without it the reviewer
+   reaches checkout and finds no COD option, which reads as a broken app.
+4. **Walk the flow once on the storefront** before submitting: product page →
+   COD button → modal → Continue to checkout → Shopify checkout shows the item,
+   asks for the address, and offers Cash on Delivery. Then confirm the order
+   appears on the app's Orders page carrying the merchant's tag.
+
+
+## The webhook URLs were registered one segment too deep
+
+The "Verifies webhooks with HMAC signatures" automated check kept failing even
+though the verification code was correct. Probing
+`https://easy-order-cod.vercel.app/webhooks/customers/data_request` by hand
+returned exactly what the check wants — 401 for a bad signature, 200 for a good
+one. Shopify was not probing that URL.
+
+`.shopify/deploy-bundle/manifest.json`, written by the last `shopify app
+deploy`, says what was actually registered:
+
+```json
+"customers_data_request_url": "https://easy-order-cod.vercel.app/app/webhooks/customers/data_request",
+"uri": "https://easy-order-cod.vercel.app/app/webhooks/app/uninstalled"
+```
+
+Note the `/app`. The CLI turns a relative `uri` into an endpoint by
+**concatenating** it onto `application_url`, not by resolving it as a URL. This
+app's `application_url` is `https://easy-order-cod.vercel.app/app` — the
+embedded UI lives under `/app` — so every relative `uri` shipped a segment too
+deep, at a path the app answers with **404**. Shopify saw a 404 where a signed
+401 belongs, and failed the check.
+
+Two consequences, only one of them visible:
+
+- the review check failed;
+- `app/uninstalled` and `app/scopes_update` **never fired in production**, so
+  sessions were never deleted when a shop uninstalled.
+
+Most apps never meet this because their `application_url` is a bare origin.
+
+**The fix:** every `uri` in `shopify.app.production.toml` is now an absolute
+`https://easy-order-cod.vercel.app/webhooks/…` URL, and must stay that way.
+`shopify.app.toml` keeps relative URIs on purpose — `shopify app dev` rewrites
+its `application_url` to the tunnel root, which has no path, so they resolve
+correctly there. That is one more reason never to deploy the dev config.
+
+`npm run check:release` now resolves each `uri` the same way the CLI does,
+rejects any that lands outside `/webhooks/*`, and POSTs an invalidly-signed
+delivery to the compliance endpoint to confirm it answers 401.
+
 ## The invariants
 
 1. **One deployable branch: `master`.** It is the Vercel project's Production
@@ -46,7 +130,11 @@ reasons that the rules below now prevent:
    `shopify.app.production.toml`, the theme extension and `app/shopify.server.ts`,
    or if `https://<production host>/healthz` does not answer `200`. It reports
    any `x-vercel-error` it sees, which names the failure directly.
-4. **Release against the production alias, never a deployment URL.**
+4. **Webhook `uri` values in the release config are absolute URLs.** A relative
+   one is concatenated onto `application_url`, which ends in `/app`, and lands
+   on a 404. The pre-flight resolves them the CLI's way and probes the
+   compliance endpoint for a 401.
+5. **Release against the production alias, never a deployment URL.**
    `easy-order-cod.vercel.app` always points at the current production
    deployment. The per-deployment `…-<hash>-<team>.vercel.app` URLs are
    throwaway and may sit behind Deployment Protection — a released version
@@ -79,7 +167,7 @@ reasons that the rules below now prevent:
    | --- | --- |
    | `SHOPIFY_API_KEY` | `7d6846fb9f944b6701f6cc35b77eab6f` (the `client_id`) |
    | `SHOPIFY_API_SECRET` | Partner Dashboard → your app → API credentials |
-   | `SCOPES` | `read_orders,write_orders,read_products,read_shipping` |
+   | `SCOPES` | `read_orders,write_orders,read_products` |
    | `DATABASE_URL` | the Neon **production** pooled connection string |
 
    `SHOPIFY_APP_URL` is optional: unset, the app falls back to Vercel's

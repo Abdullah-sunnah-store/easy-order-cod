@@ -122,8 +122,6 @@ export default function UpsellsPage() {
   const [title, setTitle] = useState("Special offer");
   const [type, setType] = useState("bump");
   const [offered, setOffered] = useState<Offered | null>(null);
-  const [discount, setDiscount] = useState("10");
-  const [minQty, setMinQty] = useState("1");
 
   // Opens Shopify's own picker, so merchants search their real catalogue
   // instead of retyping a title that nothing validates.
@@ -180,7 +178,6 @@ export default function UpsellsPage() {
       shopify.toast.show("Upsell created");
       setTitle("Special offer");
       setOffered(null);
-      setDiscount("10");
     }
   }, [fetcher.data, shopify]);
 
@@ -198,8 +195,10 @@ export default function UpsellsPage() {
     fd.append("offerImage", offered.image);
     fd.append("offerPrice", offered.price);
     fd.append("offerProductCount", String(offered.productCount));
-    fd.append("discountPercent", discount);
-    fd.append("minQuantity", minQty);
+    // Kept at zero: an offer adds a real product at the price Shopify holds
+    // for it, and only Shopify can discount a checkout line.
+    fd.append("discountPercent", "0");
+    fd.append("minQuantity", "1");
     fetcher.submit(fd, { method: "POST" });
   };
 
@@ -234,17 +233,19 @@ export default function UpsellsPage() {
                   label="Type"
                   options={[
                     { label: "Order bump (pre-purchase)", value: "bump" },
-                    { label: "Quantity offer", value: "quantity" },
                     { label: "Cross-sell", value: "cross_sell" },
                   ]}
                   value={type}
                   onChange={setType}
                 />
-                <TextField label="Discount %" type="number" autoComplete="off" value={discount} onChange={setDiscount} />
-                {type === "quantity" && (
-                  <TextField label="Min quantity to trigger" type="number" autoComplete="off" value={minQty} onChange={setMinQty} />
-                )}
               </InlineGrid>
+              <Text as="p" variant="bodySm" tone="subdued">
+                A ticked offer is added to the customer's cart at the price your
+                store already lists for it, and Shopify checkout prices the
+                order. To sell an add-on cheaper, create a discount in{" "}
+                <Text as="span" fontWeight="semibold">Shopify → Discounts</Text> — the app
+                can't reduce the price of a line it doesn't own.
+              </Text>
 
               <BlockStack gap="200">
                 <Text as="h3" variant="headingSm">Offered item</Text>

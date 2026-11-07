@@ -4,18 +4,17 @@ import { authenticate } from "../shopify.server";
 import { getCodSettings } from "../models/codSettings.server";
 import { getConnections } from "../models/connections.server";
 import { getActivePlan } from "../models/billing.server";
-import { can } from "../lib/plans";
-import { getLiveRates } from "../models/shippingSync.server";
+import { getMonthlyOrderCount } from "../models/usage.server";
+import { can, orderLimit } from "../lib/plans";
 import { resolveUpsells } from "../models/upsellResolve.server";
-import type { ShipMode, ShipOption, ShipRule } from "../lib/shipping";
-import {
-  DEFAULT_FALLBACK_LABEL,
-  parseJsonArray,
-  resolveShippingOptions,
-} from "../lib/shipping";
 
-// Returns the storefront-relevant COD form settings as JSON.
+// Returns the storefront-relevant COD settings as JSON.
 // Called by the theme extension via /apps/cod/settings (signed by Shopify).
+//
+// Nothing here describes prices the app intends to charge: shipping, taxes,
+// discounts and any cash-on-delivery fee are Shopify checkout's to calculate.
+// What the block needs is the merchant's wording, its appearance, and which
+// add-on products may be offered.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.public.appProxy(request);
   if (!session || !admin) {
@@ -31,65 +30,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {
     /* ignore malformed */
   }
-  const mode = ((s.shippingMode as ShipMode) || "manual") as ShipMode;
-  const manual = parseJsonArray<ShipOption>(s.shippingOptions);
-  let synced = parseJsonArray<ShipOption>(s.shippingSynced);
-  // Auto-refresh keeps the form in step with the shop's shipping zones; it falls
-  // back to the last stored sync if the Admin API call fails.
-  if (s.shippingAutoSync && (mode === "auto" || mode === "both")) {
-    synced = await getLiveRates(admin, session.shop, synced);
-  }
-  const shipping = {
-    mode,
-    manual,
-    synced,
-    hiddenRates: parseJsonArray<string>(s.shippingHiddenRates),
-    rulesEnabled: s.shippingRulesEnabled,
-    rules: parseJsonArray<ShipRule>(s.shippingRules),
-    fallbackPrice: s.shippingFallbackPrice,
-    fallbackLabel: s.shippingFallbackLabel || DEFAULT_FALLBACK_LABEL,
-    freeShippingThreshold: s.freeShippingThreshold,
-  };
-  // The city-independent list, for older cached copies of cod-form.js that
-  // don't know how to re-price by city.
-  const shippingOptions = resolveShippingOptions(shipping);
+
+  // The plan's monthly allowance used to be enforced when the app created the
+  // order. It no longer creates one, so the only honest place to stop is
+  // before the button is offered — never inside the customer's checkout.
+  const limit = orderLimit(plan);
+  const overLimit =
+    limit >= 0 && (await getMonthlyOrderCount(session.shop)) >= limit;
 
   // Offers from the Upsells page, resolved to real variants and prices. A
-  // failure here must not take the order form down with it.
+  // failure here must not take the block down with it.
   let upsells: Awaited<ReturnType<typeof resolveUpsells>> = [];
   try {
     upsells = await resolveUpsells(admin, session.shop);
   } catch {
-    /* form still works without offers */
+    /* block still works without offers */
   }
-  // "+880, +91" -> ["+880","+91"]; the first is preselected on the form.
-  const dialCodes = String((s as any).dialCodes || "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
+
   return json({
-    enabled: s.enabled,
-    dialCodes,
+    enabled: s.enabled && !overLimit,
     headingText: s.headingText,
     buttonText: s.buttonText,
-    successMessage: s.successMessage,
     builder,
     // Storefront values that used to live in the theme block's schema.
     currencySymbol: s.currencySymbol,
     countdownMinutes: s.countdownMinutes,
-    codFee: s.codFee,
-    shippingOptions,
-    shipping,
-    upsells,
-    fields: {
-      name: s.showName,
-      email: s.showEmail,
-      phone: s.showPhone,
-      address: s.showAddress,
-      city: s.showCity,
-      quantity: s.showQuantity,
-      notes: s.showNotes,
-    },
+    // Offers are added to the Shopify cart at the price Shopify holds for
+    // them, so the stored discount percentage is deliberately not sent — the
+    // block must never show a price checkout won't honour.
+    upsells: upsells.map((o) => ({
+      id: o.id,
+      title: o.title,
+      type: o.type,
+      kind: o.kind,
+      minQuantity: o.minQuantity,
+      sourceTitle: o.sourceTitle,
+      items: o.items,
+    })),
     // Marketing pixels are a Basic-plan feature — withheld on Free so the
     // storefront never fires them for a shop that isn't entitled to them.
     pixels: pixelsAllowed
