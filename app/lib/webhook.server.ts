@@ -69,9 +69,44 @@ export async function authenticateWebhook(request: Request) {
     return await authenticate.webhook(request);
   } catch (error) {
     // Keep the status honest if the library rejects it for its own reasons.
-    if (error instanceof Response && error.status === 400) {
-      throw new Response("Unauthorized", { status: 401 });
+    // Headers missing or the wrong method: a malformed request, not ours to
+    // process. Anything else past our signature check is a session problem.
+    if (error instanceof Response && (error.status === 400 || error.status === 405)) {
+      throw new Response("Unauthorized", { status: error.status === 400 ? 401 : 405 });
     }
-    throw error;
+    // The signature is already verified above, so this delivery is genuine.
+    // What failed is the library loading the shop's offline session: with
+    // expiring offline tokens it refreshes an expired access token first, and
+    // after an uninstall Shopify refuses that refresh. Every app/uninstalled
+    // and shop/redact for a shop installed over an hour earlier then answered
+    // 500 and was retried for hours (seen on the App Review store).
+    // Hand back the context without an admin client instead: the cleanup
+    // handlers need only the shop, and the rest already treat a missing admin
+    // as "no session".
+    console.warn(
+      `${LOG_PREFIX} webhook session unavailable, continuing without admin:`,
+      error instanceof Response ? `HTTP ${error.status}` : (error as any)?.message || error,
+    );
+    return contextFromHeaders(request.headers, rawBody);
   }
+}
+
+const LOG_PREFIX = "COD:";
+
+function contextFromHeaders(headers: Headers, rawBody: string) {
+  let payload: any = {};
+  try {
+    payload = JSON.parse(rawBody || "{}");
+  } catch {
+    payload = {};
+  }
+  return {
+    shop: headers.get("x-shopify-shop-domain") || "",
+    topic: (headers.get("x-shopify-topic") || "").toUpperCase().replace(/\//g, "_"),
+    apiVersion: headers.get("x-shopify-api-version") || "",
+    webhookId: headers.get("x-shopify-webhook-id") || "",
+    payload,
+    session: undefined,
+    admin: undefined,
+  } as unknown as Awaited<ReturnType<typeof authenticate.webhook>>;
 }
