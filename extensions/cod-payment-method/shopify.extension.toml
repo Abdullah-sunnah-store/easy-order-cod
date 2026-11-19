@@ -1,0 +1,28 @@
+# Selects Cash on Delivery at checkout for carts that came from the COD button.
+#
+# App Store review 5.1.2: after "Continue to checkout" the customer still had to
+# pick Cash on Delivery themselves. This Payment Customization function runs in
+# Shopify checkout. When the cart carries the `_easy_order_cod` attribute (set by
+# the storefront block just before redirecting to /checkout) and the store
+# offers a Cash on Delivery payment method, it hides the other methods, so COD
+# is the one checkout uses. Carts that did not come from the COD button are left
+# alone.
+#
+# The app activates it on each shop automatically (models/paymentCustomization
+# .server.ts) the first time the merchant opens the app.
+api_version = "2026-07"
+
+[[extensions]]
+name = "COD payment method"
+handle = "cod-payment-method"
+type = "function"
+description = "Uses Cash on Delivery at checkout for orders placed with the COD button."
+
+  [[extensions.targeting]]
+  target = "cart.payment-methods.transform.run"
+  input_query = "src/cart_payment_methods_transform_run.graphql"
+  export = "cart-payment-methods-transform-run"
+
+  [extensions.build]
+  command = ""
+  path = "dist/function.wasm"

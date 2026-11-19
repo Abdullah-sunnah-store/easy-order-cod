@@ -3,6 +3,7 @@ import { redirect } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 
 import { login } from "../../shopify.server";
+import { embeddedAppUrl, isEmbeddedRequest } from "../../lib/embedded.server";
 
 import styles from "./styles.module.css";
 
@@ -13,7 +14,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
-  return { showForm: Boolean(login) };
+  // Loaded inside the Shopify admin without `shop`: recover it from `host`, and
+  // never offer the shop-domain form in the admin (App Store requirement 4.5.4).
+  const resume = embeddedAppUrl(request);
+  if (resume) throw redirect(resume);
+
+  return { showForm: Boolean(login) && !isEmbeddedRequest(request) };
 };
 
 export default function App() {
@@ -24,8 +30,8 @@ export default function App() {
       <div className={styles.content}>
         <h1 className={styles.heading}>Easy order COD</h1>
         <p className={styles.text}>
-          Sell cash on delivery without checkout. Add a one-step order form to
-          any product page and turn browsers into confirmed COD orders.
+          A cash-on-delivery button for your product pages that sends customers
+          straight to Shopify checkout with Cash on Delivery selected.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -41,19 +47,19 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>A COD form on your product pages</strong>. Add the form as a
-            theme block, choose which fields appear, and take the customer's
-            name, phone, city and address without sending them to checkout.
+            <strong>A COD button on your product pages</strong>. Customers pick
+            a quantity and any add-ons, then finish in Shopify checkout, which
+            collects their address and uses Cash on Delivery as the payment.
           </li>
           <li>
-            <strong>Delivery charges that fit your rates</strong>. Enter your own
-            shipping options, sync the rates already set on your store, or charge
-            by the city the customer types in.
+            <strong>Offers checkout honours</strong>. Quantity offers, bundles
+            and add-ons are real Shopify discounts, so the price in the form is
+            the price at checkout.
           </li>
           <li>
-            <strong>Fewer fake orders</strong>. Block abusive IPs and postal
-            codes, cap how many orders one phone number can place, and add phone
-            confirmation before an order is created.
+            <strong>Review risky COD orders</strong>. Orders from postal codes
+            you list, or from customers over your order limit, are tagged so you
+            can confirm them before shipping.
           </li>
         </ul>
       </div>

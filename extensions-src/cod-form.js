@@ -252,7 +252,6 @@
       overlay.classList.add("cod--open");
       document.body.style.overflow = "hidden";
       track.o = 1;
-      if (root.codTimer) root.codTimer(); // countdown lives in cod-style.js
     }
     function hide() { overlay.classList.remove("cod--open"); document.body.style.overflow = ""; }
     function close() {

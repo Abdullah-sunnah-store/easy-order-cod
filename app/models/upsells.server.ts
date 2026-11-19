@@ -4,6 +4,7 @@ import {
   deleteAutomaticDiscounts,
   setAutomaticDiscountsActive,
 } from "./discounts.server";
+import { forgetUpsells } from "./upsellResolve.server";
 
 type AdminClient = { graphql: (q: string, o?: any) => Promise<Response> };
 
@@ -54,7 +55,7 @@ export async function createUpsell(admin: AdminClient, shop: string, data: Upsel
     });
   }
   try {
-    return await prisma.upsell.create({
+    const created = await prisma.upsell.create({
       data: {
         shop,
         ...rest,
@@ -64,6 +65,8 @@ export async function createUpsell(admin: AdminClient, shop: string, data: Upsel
         triggerTitles: JSON.stringify(triggerTitles),
       },
     });
+    forgetUpsells(shop);
+    return created;
   } catch (error) {
     await deleteAutomaticDiscounts(admin, [discountId]);
     throw error;
@@ -76,6 +79,7 @@ export async function deleteUpsell(admin: AdminClient, shop: string, id: string)
   if (!offer) return;
   await deleteAutomaticDiscounts(admin, [offer.discountId]);
   await prisma.upsell.deleteMany({ where: { id, shop } });
+  forgetUpsells(shop);
 }
 
 export async function toggleUpsell(admin: AdminClient, shop: string, id: string, enabled: boolean) {
@@ -83,4 +87,5 @@ export async function toggleUpsell(admin: AdminClient, shop: string, id: string,
   if (!offer) return;
   await setAutomaticDiscountsActive(admin, [offer.discountId], enabled);
   await prisma.upsell.updateMany({ where: { id, shop }, data: { enabled } });
+  forgetUpsells(shop);
 }

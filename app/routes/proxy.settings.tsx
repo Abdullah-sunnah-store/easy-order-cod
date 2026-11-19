@@ -136,15 +136,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       rtl: isRtl(locale) && Object.keys(translated).length > 0,
       builder,
       currencySymbol: s.currencySymbol,
-      countdownMinutes: s.countdownMinutes,
       upsells: visible,
       tiers,
       downsell,
       recommend,
       pixels,
     },
-    // Both the block and the app embed fetch this on every page view; a short
-    // browser cache stops a single visit from asking twice.
-    { headers: { "Cache-Control": "private, max-age=60" } },
+    // Both the block and the app embed fetch this on every page view; a very
+    // short browser cache stops a single visit from asking twice, while an
+    // offer the merchant just saved still shows on the next page load.
+    { headers: { "Cache-Control": "private, max-age=5" } },
   );
 };

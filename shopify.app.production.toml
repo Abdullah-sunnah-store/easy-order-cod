@@ -92,7 +92,9 @@ api_version = "2026-07"
 # needs write_orders. read_products resolves the add-on offers. write_discounts
 # turns quantity offers, bundles and the downsell into real Shopify discounts,
 # so checkout charges exactly the price the form shows.
-scopes = "read_orders,write_orders,read_products,write_discounts"
+# write_payment_customizations activates the "COD payment method" function,
+# which makes checkout use Cash on Delivery for carts from the COD button.
+scopes = "read_orders,write_orders,read_products,write_discounts,read_payment_customizations,write_payment_customizations"
 
 [auth]
 redirect_urls = [

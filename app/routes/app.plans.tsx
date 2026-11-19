@@ -30,7 +30,7 @@ import {
   type BillingCycle,
   type PlanName,
 } from "../lib/plans";
-import { BILLING_TEST, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
+import { BILLING_TEST, cancelAllSubscriptions, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
 import { getMonthlyOrderCount } from "../models/usage.server";
 
 const TAGLINES: Record<PlanName, string> = {
@@ -51,19 +51,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   forgetCachedPlan(session.shop);
   const form = await request.formData();
   const key = String(form.get("plan"));
 
   if (key === FREE_PLAN) {
-    const { appSubscriptions } = await billing.check({
-      plans: BILLING_PLANS.map((p) => p.key) as never[],
-      isTest: BILLING_TEST,
-    });
-    for (const sub of appSubscriptions ?? []) {
-      await billing.cancel({ subscriptionId: sub.id, isTest: BILLING_TEST, prorate: true });
-    }
+    const error = await cancelAllSubscriptions(admin).catch((e) => String(e?.message || e));
+    forgetCachedPlan(session.shop);
+    if (error) return { error: `Shopify couldn't cancel the subscription: ${error}` };
     return redirect("/app/plans");
   }
 
@@ -75,7 +71,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function PlansPage() {
   const { active, cycle, activeKey, used, limit, isTest } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
+  const actionError = fetcher.data && "error" in fetcher.data ? String(fetcher.data.error) : "";
   const busy = fetcher.state !== "idle";
   const [view, setView] = useState<BillingCycle>(cycle ?? "monthly");
   const nearLimit = limit >= 0 && used >= limit * 0.8;
@@ -86,6 +83,13 @@ export default function PlansPage() {
     <Page>
       <TitleBar title="Plans" />
       <Layout>
+        {actionError && (
+          <Layout.Section>
+            <Banner tone="critical">
+              <Text as="p" variant="bodyMd">{actionError}</Text>
+            </Banner>
+          </Layout.Section>
+        )}
         <Layout.Section>
           <Banner tone={nearLimit ? "warning" : "info"}>
             <Text as="p" variant="bodyMd">

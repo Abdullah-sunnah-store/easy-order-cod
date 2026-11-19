@@ -1,0 +1,13 @@
+query CartPaymentMethodsTransformRunInput {
+  cart {
+    # Set by the storefront COD block (extensions-src/cod-form.js) right before
+    # it sends the customer to checkout.
+    codButton: attribute(key: "_easy_order_cod") {
+      value
+    }
+  }
+  paymentMethods {
+    id
+    name
+  }
+}

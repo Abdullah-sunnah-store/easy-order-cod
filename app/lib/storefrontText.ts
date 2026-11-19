@@ -18,7 +18,6 @@ export type TextKey =
   | "taking"
   | "error"
   | "choose"
-  | "hurry"
   | "added"
   | "special"
   | "dsTitle"
@@ -42,7 +41,6 @@ export const TEXT_FIELDS: { key: TextKey; label: string; def: string; hint?: str
   { key: "taking", label: "Redirecting message", def: "Taking you to checkout…" },
   { key: "error", label: "Error message", def: "We couldn't start your checkout. Please try again." },
   { key: "choose", label: "Choose option message", def: "Please choose a product option first." },
-  { key: "hurry", label: "Countdown prefix", def: "Hurry! Sale ends in" },
   { key: "added", label: "Generic add-on name", def: "Added item" },
   { key: "special", label: "Generic offer name", def: "Special offer" },
   { key: "dsTitle", label: "Downsell heading", def: "Wait! Take {p}% off your order", hint: "{p} = percent" },

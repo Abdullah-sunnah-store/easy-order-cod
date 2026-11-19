@@ -34,22 +34,6 @@
     root.codStyled = true;
     var cfg = root.codCfg, api = root.codApi, overlay = api.overlay;
 
-    // Countdown ("Hurry! Sale ends in 9:59"), started the first time the form
-    // opens — cod-form.js calls root.codTimer() from open().
-    var timerEl = overlay.querySelector("[data-cod-timer]");
-    var minutes = parseInt(cfg.countdownMinutes, 10) || 0;
-    root.codTimer = function () {
-      if (!timerEl || minutes <= 0 || root.codTimerOn) return;
-      root.codTimerOn = true;
-      timerEl.hidden = false;
-      var remaining = minutes * 60;
-      (function tick() {
-        var m = Math.floor(remaining / 60), s = remaining % 60;
-        timerEl.textContent = ((cfg.t && cfg.t.hurry) || "Hurry! Sale ends in") + " " + m + ":" + (s < 10 ? "0" : "") + s;
-        if (remaining > 0) { remaining--; setTimeout(tick, 1000); }
-      })();
-    };
-
     var bc = cfg.builder;
     if (!bc) return;
 
@@ -86,7 +70,6 @@
       api.home.appendChild(overlay);
       overlay.classList.add("cod--embedded");
       if (openBtn) openBtn.hidden = true;
-      root.codTimer();
     }
 
     // Button label (already in the visitor's language), subtitle and icon.

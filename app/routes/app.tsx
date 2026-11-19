@@ -6,11 +6,14 @@ import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
+import { ensureCodPaymentCustomization } from "../models/paymentCustomization.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  // Makes checkout use Cash on Delivery for carts from the COD button.
+  await ensureCodPaymentCustomization(admin, session.shop);
 
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };

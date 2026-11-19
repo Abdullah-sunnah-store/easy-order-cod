@@ -166,10 +166,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Moved here from the theme block's schema — the theme editor no longer
     // exposes any of these.
     currencySymbol: String(form.get("currencySymbol") || ""),
-    countdownMinutes: Math.max(
-      0,
-      parseInt(String(form.get("countdownMinutes") || "0"), 10) || 0,
-    ),
+    // The countdown timer was removed (App Store requirement 1.1.4): a timer
+    // that ends while the discount stays live is false urgency. Stored value
+    // is forced to 0 so an old setting can never resurface.
+    countdownMinutes: 0,
   });
   return { ok: true as const };
 };
@@ -223,7 +223,6 @@ export default function FormBuilder() {
     headingText: settings.headingText,
     orderTag: settings.orderTag,
     currencySymbol: settings.currencySymbol,
-    countdownMinutes: settings.countdownMinutes,
   });
   const [b, setB] = useState<Builder>(builder);
   const [tab, setTab] = useState(0);
@@ -376,7 +375,7 @@ export default function FormBuilder() {
                   <BlockStack gap="400">
                     <SectionTitle title="Colors" />
                     <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
-                      <ColorField label="Accent (required *, timer, radios)" value={b.accentColor} onChange={setBuild("accentColor")} />
+                      <ColorField label="Accent (required *, radios)" value={b.accentColor} onChange={setBuild("accentColor")} />
                       <ColorField label="Modal background" value={b.modalBg} onChange={setBuild("modalBg")} />
                       <ColorField label="Modal text color" value={b.modalTextColor} onChange={setBuild("modalTextColor")} />
                     </InlineGrid>
@@ -470,7 +469,7 @@ export default function FormBuilder() {
                     <TextField label="Order tag" autoComplete="off" value={content.orderTag} onChange={setC("orderTag")} helpText="Added to every order that came from the COD button, once Shopify checkout has created it." />
 
                     <Divider />
-                    <SectionTitle title="Currency & urgency" />
+                    <SectionTitle title="Currency" />
                     <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
                       <TextField
                         label="Currency symbol"
@@ -479,14 +478,6 @@ export default function FormBuilder() {
                         onChange={setC("currencySymbol")}
                         placeholder="Auto"
                         helpText="Leave empty to use your store's own currency format."
-                      />
-                      <TextField
-                        label="Countdown timer (minutes)"
-                        type="number"
-                        autoComplete="off"
-                        value={String(content.countdownMinutes)}
-                        onChange={setC("countdownMinutes")}
-                        helpText="0 turns the timer off."
                       />
                     </InlineGrid>
 

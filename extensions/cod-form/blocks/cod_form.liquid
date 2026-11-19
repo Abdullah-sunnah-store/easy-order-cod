@@ -11,7 +11,7 @@
   payment method in Settings → Payments.
 
   This block has NO theme-editor settings by design: text, colours, layout,
-  offers and countdown are configured in the Easy order COD app and fetched at
+  offers are configured in the Easy order COD app and fetched at
   runtime from /apps/cod/settings. Only product data — which the app can't know
   — comes from Liquid.
 {% endcomment %}
@@ -67,7 +67,6 @@
             Shipping, taxes and payment are completed at checkout.
           </p>
 
-          <div class="cod__timer" data-cod-timer hidden></div>
 
           <button type="submit" class="cod__submit" data-cod-submit></button>
           <p class="cod__msg" data-cod-message hidden></p>
@@ -75,7 +74,7 @@
       </div>
     </div>
   </div>
-  {% comment %} Appearance, countdown and templates (kept apart to stay under the 10 KB per-file limit). {% endcomment %}
+  {% comment %} Appearance and templates (kept apart to stay under the 10 KB per-file limit). {% endcomment %}
   <script src="{{ 'cod-style.js' | asset_url }}" defer></script>
 {% endif %}
 
@@ -88,7 +87,7 @@
   "settings": [
     {
       "type": "paragraph",
-      "content": "Everything about this block — text, colours, layout, add-on offers and the countdown — is configured in the Easy order COD app. No setup is needed here. The customer's contact and delivery details are collected by Shopify checkout."
+      "content": "Everything about this block — text, colours, layout, and add-on offers — is configured in the Easy order COD app. No setup is needed here. The customer's contact and delivery details are collected by Shopify checkout."
     }
   ]
 }

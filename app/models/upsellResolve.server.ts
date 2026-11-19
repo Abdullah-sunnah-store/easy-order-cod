@@ -185,6 +185,16 @@ export async function resolveUpsells(
   return resolved;
 }
 
+/**
+ * Drop the shop's cached offers. Called whenever an offer is created, deleted
+ * or switched on/off, so the storefront shows the change on the next page view
+ * instead of up to five minutes later (App Store review 5.1.2: a freshly saved
+ * "Shipping protection" offer did not appear in the form).
+ */
+export function forgetUpsells(shop: string) {
+  cache.delete(shop);
+}
+
 /** Unit price after the offer's discount, rounded to cents. */
 export function discountedPrice(price: number, discountPercent: number): number {
   const pct = Math.min(100, Math.max(0, discountPercent || 0));
