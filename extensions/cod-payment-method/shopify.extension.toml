@@ -15,6 +15,7 @@ api_version = "2026-07"
 [[extensions]]
 name = "COD payment method"
 handle = "cod-payment-method"
+uid = "b60ad1e0-10b7-bf64-786e-65956cb3955d81206290"
 type = "function"
 description = "Uses Cash on Delivery at checkout for orders placed with the COD button."
 
