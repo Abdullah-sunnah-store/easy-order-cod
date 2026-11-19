@@ -7,9 +7,9 @@ import { build } from "esbuild";
 import { statSync } from "node:fs";
 
 const LIMIT = 10_000;
-// cod-form.js = form logic, cod-style.js = appearance. Split so each file stays
+// cod-form.js = form logic, cod-style.js = appearance, cod-cart.js = cart button. Split so each file stays
 // under the per-file limit.
-const files = ["cod-form", "cod-style"];
+const files = ["cod-form", "cod-style", "cod-cart"];
 
 let failed = false;
 for (const name of files) {

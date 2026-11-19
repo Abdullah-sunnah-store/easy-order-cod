@@ -2,9 +2,14 @@
   Easy order COD app embed. Appears under Theme editor → App embeds.
   When enabled (and "Load marketing pixels" is on), loads the merchant's
   pixels from Connections site-wide and reports COD-button checkouts to them.
+  With "Cash on Delivery button in the cart" on, adds a COD button next to the
+  cart's Check out button (cod-cart.js).
 {% endcomment %}
 {% if block.settings.load_pixels %}
   <script src="{{ 'cod-embed.js' | asset_url }}" defer></script>
+{% endif %}
+{% if block.settings.cart_button %}
+  <script src="{{ 'cod-cart.js' | asset_url }}" defer></script>
 {% endif %}
 
 {% schema %}
@@ -16,6 +21,13 @@
       "type": "checkbox",
       "id": "load_pixels",
       "label": "Load marketing pixels from Connections",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "cart_button",
+      "label": "Cash on Delivery button in the cart",
+      "info": "Adds a COD button next to Check out on the cart page and cart drawer.",
       "default": true
     }
   ]

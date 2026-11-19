@@ -1,13 +1,30 @@
 query CartPaymentMethodsTransformRunInput {
   cart {
-    # Set by the storefront COD block (extensions-src/cod-form.js) right before
+    # Set by the storefront COD button (product form or cart page) right before
     # it sends the customer to checkout.
     codButton: attribute(key: "_easy_order_cod") {
       value
+    }
+    cost {
+      totalAmount {
+        amount
+      }
+    }
+    deliveryGroups {
+      deliveryAddress {
+        zip
+        countryCode
+      }
     }
   }
   paymentMethods {
     id
     name
+  }
+  # Merchant's COD rules, written by the app's "Fraud & delivery" page.
+  paymentCustomization {
+    metafield(namespace: "$app:cod-payment", key: "config") {
+      jsonValue
+    }
   }
 }

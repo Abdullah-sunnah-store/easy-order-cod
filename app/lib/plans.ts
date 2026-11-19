@@ -41,7 +41,7 @@ export function billingPlan(key: string) {
 // renders these, and proxy.settings.tsx enforces them by withholding the
 // storefront button once the allowance is used up.
 export const PLAN_LIMITS: Record<PlanName, { orders: number; upsells: number; quantityOffers: number }> = {
-  Free: { orders: 60, upsells: 1, quantityOffers: 1 },
+  Free: { orders: 100, upsells: 1, quantityOffers: 1 },
   Basic: { orders: 550, upsells: -1, quantityOffers: -1 },
   Advanced: { orders: 10000, upsells: -1, quantityOffers: -1 },
   Unlimited: { orders: -1, upsells: -1, quantityOffers: -1 },
@@ -83,7 +83,9 @@ export const FEATURE_MIN_PLAN: Record<Feature, PlanName> = {
 // feature that works today — App Store review and merchants both hold us to it.
 export const PLAN_FEATURES: Record<PlanName, string[]> = {
   Free: [
-    "COD checkout button",
+    "COD button on product pages and in the cart",
+    "Checkout opens with Cash on Delivery selected",
+    "Hide COD by postal code or order value",
     "Orders dashboard",
     "1 quantity offer (Buy 2, save 10%…)",
     "1 upsell offer",
