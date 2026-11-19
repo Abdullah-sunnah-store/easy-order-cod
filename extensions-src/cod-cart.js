@@ -17,12 +17,11 @@
   var bg = "", fg = "";
   var SELECTOR = 'button[name="checkout"], input[name="checkout"], #CartDrawer-Checkout';
 
-  function mark(value, keepalive) {
+  function mark(value) {
     var attributes = {};
     attributes[ATTR] = value;
     return fetch(root + "cart/update.js", {
       method: "POST",
-      keepalive: !!keepalive,
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ attributes: attributes })
     });
@@ -44,7 +43,18 @@
       var theirs = targets[i];
       if (theirs.getAttribute("data-cod-cart")) continue;
       theirs.setAttribute("data-cod-cart", "1");
-      theirs.addEventListener("click", function () { mark("", true).catch(function () {}); });
+      // Clear the COD mark first, then let the theme's own button continue —
+      // otherwise the page can leave before the request lands.
+      theirs.addEventListener("click", function (e) {
+        var btn = e.currentTarget;
+        if (btn.getAttribute("data-cod-cleared")) { btn.removeAttribute("data-cod-cleared"); return; }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        mark("").catch(function () {}).then(function () {
+          btn.setAttribute("data-cod-cleared", "1");
+          btn.click();
+        });
+      }, true);
 
       var mine = document.createElement("button");
       mine.type = "button";
@@ -52,6 +62,8 @@
       mine.textContent = label;
       mine.style.marginTop = "10px";
       mine.style.width = "100%";
+      mine.style.flex = "1 1 100%";
+      mine.style.whiteSpace = "nowrap";
       if (bg) { mine.style.background = bg; mine.style.borderColor = bg; }
       if (fg) mine.style.color = fg;
       mine.addEventListener("click", goCod);
