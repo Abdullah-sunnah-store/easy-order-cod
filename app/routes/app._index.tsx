@@ -24,6 +24,7 @@ import { listQuantityOffers } from "../models/quantityOffers.server";
 import { getActivePlan } from "../models/billing.server";
 import { getMonthlyOrderCount } from "../models/usage.server";
 import { can, orderLimit, formatLimit } from "../lib/plans";
+import { getCodRules } from "../models/paymentCustomization.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -81,11 +82,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       connections.pinterestTagId,
   );
 
+  // COD at checkout (payment customization) and one-click theme setup links.
+  const cod = await getCodRules(admin).catch(() => ({ active: false }));
+  const apiKey = process.env.SHOPIFY_API_KEY?.trim() || "";
+  const editor = `https://${session.shop}/admin/themes/current/editor`;
+
   return {
+    setupLinks: {
+      // Opens the theme editor on a product page with the COD block added.
+      addBlock: `${editor}?template=product&addAppBlockId=${apiKey}/cod_form&target=mainSection`,
+      // Opens App embeds with Easy order COD switched on (pixels + cart button).
+      activateEmbed: `${editor}?context=apps&activateAppId=${apiKey}/cod_embed`,
+    },
     stats: { count, revenue, currency, pending },
     ordersBlocked,
     usage: { used, limit, overLimit: limit >= 0 && used >= limit },
     checklist: {
+      codCheckout: cod.active,
       formEnabled: settings.enabled,
       hasPixels,
       hasUpsells: upsells.length > 0,
@@ -111,7 +124,7 @@ function ChecklistItem({ done, children }: { done: boolean; children: React.Reac
 }
 
 export default function Dashboard() {
-  const { stats, checklist, ordersBlocked, usage } = useLoaderData<typeof loader>();
+  const { stats, checklist, ordersBlocked, usage, setupLinks } = useLoaderData<typeof loader>();
 
   return (
     <Page>
@@ -174,6 +187,9 @@ export default function Dashboard() {
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Setup checklist</Text>
                 <BlockStack gap="300">
+                  <ChecklistItem done={checklist.codCheckout}>
+                    Cash on Delivery selected at checkout (needs Cash on Delivery under Settings → Payments)
+                  </ChecklistItem>
                   <ChecklistItem done={checklist.formEnabled}>
                     COD order form enabled
                   </ChecklistItem>
@@ -204,11 +220,22 @@ export default function Dashboard() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">Add the form to your store</Text>
+                <Text as="p" tone="subdued">
+                  Two clicks: each button opens your theme editor with the step
+                  already done — just press Save there.
+                </Text>
+                <BlockStack gap="200">
+                  <Button url={setupLinks.addBlock} target="_blank" variant="primary">
+                    1. Add the COD button to product pages
+                  </Button>
+                  <Button url={setupLinks.activateEmbed} target="_blank">
+                    2. Turn on cart button &amp; pixels
+                  </Button>
+                </BlockStack>
                 <List type="number">
-                  <List.Item>Open your theme editor.</List.Item>
-                  <List.Item>On a product template, choose <b>Add block → Apps → COD Order Form</b>.</List.Item>
-                  <List.Item>For pixels: <b>App embeds → Easy order COD</b> → turn on.</List.Item>
-                  <List.Item>Save. Customers can now order with Cash on Delivery.</List.Item>
+                  <List.Item>Or by hand: on a product template choose <b>Add block → Apps → COD Order Form</b>.</List.Item>
+                  <List.Item><b>App embeds → Easy order COD</b> → turn on (cart COD button and pixels).</List.Item>
+                  <List.Item>Add <b>Cash on Delivery (COD)</b> in Settings → Payments → Manual payment methods.</List.Item>
                 </List>
               </BlockStack>
             </Card>

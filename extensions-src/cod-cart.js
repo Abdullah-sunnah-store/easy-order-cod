@@ -62,12 +62,23 @@
       mine.textContent = label;
       mine.style.marginTop = "10px";
       mine.style.width = "100%";
-      mine.style.flex = "1 1 100%";
-      mine.style.whiteSpace = "nowrap";
+      mine.style.display = "block";
       if (bg) { mine.style.background = bg; mine.style.borderColor = bg; }
       if (fg) mine.style.color = fg;
       mine.addEventListener("click", goCod);
-      theirs.parentNode.insertBefore(mine, theirs.nextSibling);
+      // Themes often lay the cart buttons out in a flex row (Dawn's .cart__ctas),
+      // which squeezes a second button. Put ours on its own full-width row
+      // under that row instead.
+      var host = theirs.parentNode;
+      var rowLayout = /flex|grid/.test(getComputedStyle(host).display);
+      if (rowLayout) {
+        var wrap = document.createElement("div");
+        wrap.className = "cod-cart-row";
+        wrap.appendChild(mine);
+        host.parentNode.insertBefore(wrap, host.nextSibling);
+      } else {
+        host.insertBefore(mine, theirs.nextSibling);
+      }
     }
   }
 
